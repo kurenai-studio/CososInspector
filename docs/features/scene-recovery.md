@@ -159,6 +159,7 @@ npm run cocos-scene-to-creator -- tmp/godeebxp-scene-snapshot.json `
 | G | 2.x Spine/BMFont zip 导出（P4a） | ✅ 面板导出；手动拖入 Creator |
 | H | Spine/BMFont 自动绑入（P4b） | ✅ `--with-spine-fonts` |
 | I | live path 匹配 + MCP 下载（P5） | ✅ list/download Spine·BMFont |
+| J | 2.x originalSize 合成导出（P6） | ✅ 默认 engine；legacy 可回退 |
 
 ### P5（MCP）
 

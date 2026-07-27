@@ -19,12 +19,16 @@ export interface Cc2SpriteExtractResult {
   rect: Cc2FrameRect;
   isRotated: boolean;
   textureSize: { w: number; h: number };
-  /** 展开旋转后的逻辑宽高 */
+  /** 展开旋转后的逻辑宽高（合成前帧尺寸） */
   frameSize: { w: number; h: number };
+  originalSize: { w: number; h: number };
+  offset: { x: number; y: number };
   canvas: HTMLCanvasElement;
   imageData: ImageData;
   method: string;
 }
+
+export type Cc2ExtractPath = 'engine' | 'legacy';
 
 type TexLike = {
   width?: number;
@@ -284,6 +288,35 @@ function cropFrame(
   return canvas;
 }
 
+/** 与 3.x engine 一致：trim 放置到 originalSize 画布 */
+export const calcTrimPlacement = (
+  ow: number,
+  oh: number,
+  fw: number,
+  fh: number,
+  offset: { x: number; y: number }
+): { trimX: number; trimY: number } => ({
+  trimX: Math.round((ow - fw) / 2 + offset.x),
+  trimY: Math.round((oh - fh) / 2 - offset.y),
+});
+
+const compositeOnOriginal = (
+  frameCanvas: HTMLCanvasElement,
+  ow: number,
+  oh: number,
+  trimX: number,
+  trimY: number
+): HTMLCanvasElement => {
+  const out = document.createElement('canvas');
+  out.width = Math.max(1, ow);
+  out.height = Math.max(1, oh);
+  const ctx = out.getContext('2d');
+  if (!ctx) return frameCanvas;
+  ctx.clearRect(0, 0, out.width, out.height);
+  ctx.drawImage(frameCanvas, trimX, trimY);
+  return out;
+};
+
 /** 仅元数据（不读像素），供场景快照 / listSprites */
 export function collectSpriteFrameMeta(nodeId: string): {
   frameName: string;
@@ -341,7 +374,8 @@ export function collectSpriteFrameMeta(nodeId: string): {
 }
 
 export async function extractSpriteFrame(
-  nodeId: string
+  nodeId: string,
+  options?: { path?: Cc2ExtractPath }
 ): Promise<Cc2SpriteExtractResult | null> {
   const scene = getSceneRoot();
   if (!scene) return null;
@@ -378,20 +412,42 @@ export async function extractSpriteFrame(
   }
 
   const rotated = resolveRotated(frame);
-  const canvas = cropFrame(src, rect, rotated);
+  const frameCanvas = cropFrame(src, rect, rotated);
+  const fw = frameCanvas.width;
+  const fh = frameCanvas.height;
+  const offset = resolveOffset(frame);
+  const originalSize = resolveOriginalSize(frame, { w: fw, h: fh });
+  const path = options?.path ?? 'engine';
+
+  let canvas = frameCanvas;
+  let method = rotated ? 'dom-crop-unrotate' : 'dom-crop';
+  if (
+    path !== 'legacy' &&
+    (originalSize.w !== fw || originalSize.h !== fh || offset.x !== 0 || offset.y !== 0)
+  ) {
+    const { trimX, trimY } = calcTrimPlacement(
+      originalSize.w,
+      originalSize.h,
+      fw,
+      fh,
+      offset
+    );
+    canvas = compositeOnOriginal(frameCanvas, originalSize.w, originalSize.h, trimX, trimY);
+    method = rotated ? 'dom-crop-unrotate-original' : 'dom-crop-original';
+  }
+
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-  const frameName =
-    frame.name || frame._name || '(sprite)';
+  const frameName = frame.name || frame._name || '(sprite)';
   const texW = Math.floor(tex.width ?? 0);
   const texH = Math.floor(tex.height ?? 0);
 
   console.log(
     `[纹理提取:2.x] ${getNodeName(node)}(${nodeId}) - ${frameName}` +
       ` rect=${rect.w}x${rect.h}@${rect.x},${rect.y}` +
-      ` rotated=${rotated} → ${canvas.width}x${canvas.height}`
+      ` rotated=${rotated} → ${canvas.width}x${canvas.height} · ${method}`
   );
 
   return {
@@ -401,10 +457,12 @@ export async function extractSpriteFrame(
     rect,
     isRotated: rotated,
     textureSize: { w: texW, h: texH },
-    frameSize: { w: canvas.width, h: canvas.height },
+    frameSize: { w: fw, h: fh },
+    originalSize,
+    offset,
     canvas,
     imageData,
-    method: rotated ? 'dom-crop-unrotate' : 'dom-crop',
+    method,
   };
 }
 

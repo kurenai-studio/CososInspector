@@ -135,7 +135,8 @@ const detailFromExtract = (
   meta: NonNullable<ReturnType<typeof collectSpriteFrameMeta>>,
   hasPixels: boolean,
   method: string,
-  extractError: string | null
+  extractError: string | null,
+  usedPath: 'engine' | 'legacy' = 'legacy'
 ): Cc2SerializableSpriteDetail => ({
   nodeId,
   nodeName,
@@ -152,7 +153,7 @@ const detailFromExtract = (
   extractMethod: method,
   extractError,
   hasPixels,
-  usedPath: 'legacy',
+  usedPath,
 });
 
 async function buildTextureDownload(
@@ -160,10 +161,13 @@ async function buildTextureDownload(
   options?: {
     delivery?: TextureDownloadDelivery;
     wsPort?: number;
+    path?: string;
   }
 ): Promise<TextureDownloadResult> {
   try {
-    const extracted = await extractSpriteFrame(nodeId);
+    const extractPath =
+      options?.path === 'legacy' ? 'legacy' : 'engine';
+    const extracted = await extractSpriteFrame(nodeId, { path: extractPath });
     if (!extracted) {
       return { ok: false, error: '节点无 Sprite 或纹理提取失败' };
     }
@@ -188,10 +192,16 @@ async function buildTextureDownload(
     const detail = detailFromExtract(
       nodeId,
       extracted.nodeName,
-      meta,
+      {
+        ...meta,
+        originalSize: extracted.originalSize,
+        offset: extracted.offset,
+        frameSize: extracted.frameSize,
+      },
       true,
       extracted.method,
-      null
+      null,
+      extractPath
     );
     const delivery = options?.delivery ?? 'share';
 
@@ -349,7 +359,8 @@ export const cocosInspectorMcpApi2 = {
           meta,
           !!extracted,
           extracted?.method ?? 'meta-only',
-          extracted ? null : '像素提取失败'
+          extracted ? null : '像素提取失败',
+          'engine'
         ),
       };
     } catch (e) {
@@ -361,7 +372,8 @@ export const cocosInspectorMcpApi2 = {
           meta,
           false,
           'meta-only',
-          e instanceof Error ? e.message : String(e)
+          e instanceof Error ? e.message : String(e),
+          'engine'
         ),
       };
     }
@@ -381,6 +393,7 @@ export const cocosInspectorMcpApi2 = {
     return buildTextureDownload(nodeId, {
       delivery: options?.delivery,
       wsPort: options?.wsPort,
+      path: options?.path,
     });
   },
 

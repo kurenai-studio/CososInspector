@@ -1,16 +1,22 @@
 # Cocos Creator 2.x（含 2.4）支持
 
-> 状态：**P0–P5 已落地**。P5 = Spine/BMFont live path 匹配 + MCP 列表/下载工具。
+> 状态：**P0–P6 已落地**。P6 = 2.x 纹理导出合成到 originalSize（对齐 3.x engine）。
 
 ## 能力矩阵
 
 | 能力 | 3.x | 2.x |
 |------|-----|-----|
-| 场景复刻 Sprite/UI/Label/Widget | ✓ | ✓ |
-| Spine / BMFont zip 面板导出 | ✓ | ✓ P4a |
-| Spine / BMFont **自动绑入 Creator** | ✓ P4b | ✓ P4b |
-| Spine / BMFont live path 匹配 | ✓ P5 | ✓ P5 |
-| MCP `list/download` Spine·BMFont | ✓ P5 | ✓ P5 |
+| Sprite 图集裁切 | ✓ | ✓ P1 |
+| originalSize + offset 合成导出 | ✓ engine | ✓ P6（默认） |
+| Spine / BMFont 自动绑入 | ✓ | ✓ P4b |
+| MCP list/download Spine·BMFont | ✓ | ✓ P5 |
+
+## P6：2.x 纹理引擎对齐
+
+- `extractSpriteFrame` 默认 `path: 'engine'`：裁切(+反旋转)后按  
+  `trimX=(ow-fw)/2+ox`、`trimY=(oh-fh)/2-oy` 贴到 `originalSize` 画布  
+- `path: 'legacy'` 仅输出裁切帧（调试）  
+- 面板预览 / `downloadTexture` / 复刻 `--with-textures` 默认吃到 originalSize PNG  
 
 ## P5：MCP 与路径匹配
 
