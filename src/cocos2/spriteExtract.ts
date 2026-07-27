@@ -230,6 +230,48 @@ function cropFrame(
   return canvas;
 }
 
+/** 仅元数据（不读像素），供场景快照 / listSprites */
+export function collectSpriteFrameMeta(nodeId: string): {
+  frameName: string;
+  rect: Cc2FrameRect;
+  isRotated: boolean;
+  textureSize: { w: number; h: number };
+  frameSize: { w: number; h: number };
+  enabled: boolean;
+} | null {
+  const scene = getSceneRoot();
+  if (!scene) return null;
+  const node = findNodeById(scene, nodeId);
+  if (!node) return null;
+  const comp = getSpriteComponent(node);
+  if (!comp) return null;
+  const frame = resolveFrame(comp);
+  if (!frame) return null;
+  const rect = resolveRect(frame);
+  if (!rect || rect.w <= 0 || rect.h <= 0) return null;
+  const rotated = resolveRotated(frame);
+  const tex = resolveTexture(frame);
+  const outW = rotated ? rect.h : rect.w;
+  const outH = rotated ? rect.w : rect.h;
+  const enabled =
+    typeof comp.enabled === 'boolean'
+      ? comp.enabled
+      : typeof comp._enabled === 'boolean'
+        ? comp._enabled
+        : true;
+  return {
+    frameName: frame.name || frame._name || '(sprite)',
+    rect,
+    isRotated: rotated,
+    textureSize: {
+      w: Math.floor(tex?.width ?? 0),
+      h: Math.floor(tex?.height ?? 0),
+    },
+    frameSize: { w: outW, h: outH },
+    enabled,
+  };
+}
+
 export async function extractSpriteFrame(
   nodeId: string
 ): Promise<Cc2SpriteExtractResult | null> {

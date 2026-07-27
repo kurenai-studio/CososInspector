@@ -232,6 +232,7 @@ export const cocosInspectorMcpApi = {
   getPageInfo(): {
     pageUrl: string;
     engineVersion: string;
+    engineFamily: '3';
     sceneName: string;
     hasCocos: boolean;
     paused: boolean;
@@ -242,6 +243,7 @@ export const cocosInspectorMcpApi = {
     return {
       pageUrl: window.location.href,
       engineVersion: String(window.cc?.ENGINE_VERSION ?? '3.x'),
+      engineFamily: '3',
       sceneName: scene?.name ?? '',
       hasCocos: !!window.cc,
       paused: pause.paused,

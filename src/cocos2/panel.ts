@@ -25,12 +25,13 @@ import {
   extractSpriteFrame,
   type Cc2SpriteExtractResult,
 } from './spriteExtract';
+import { installMcpBridge } from './mcpBridge';
 
 declare const __INSPECTOR_VERSION__: string;
 
 const REFRESH_MS = 500;
 
-/** Cocos Creator 2.x（含 2.4）P0 面板：节点树 + 基础 Inspector + 暂停 */
+/** Cocos Creator 2.x（含 2.4）面板：节点树 + Inspector + 暂停 + MCP P2 */
 export class CocosInspector2 {
   private root: HTMLElement | null = null;
   private panel: HTMLElement | null = null;
@@ -40,6 +41,7 @@ export class CocosInspector2 {
   private searchInput: HTMLInputElement | null = null;
   private statusEl: HTMLElement | null = null;
   private pauseBtn: HTMLButtonElement | null = null;
+  private mcpStatusEl: HTMLElement | null = null;
 
   private expandedScene = new Set<string>();
   private selectedId: string | null = null;
@@ -58,10 +60,11 @@ export class CocosInspector2 {
   private init(): void {
     this.createUI();
     this.bindTreeEvents();
+    installMcpBridge();
     this.refreshAll(true);
     this.startAutoRefresh();
     window.postMessage({ type: 'cocos-inspector-ready', engineFamily: '2' }, '*');
-    logEngine('已启动 2.x 面板（节点树 + Inspector + 暂停；MCP/纹理 P0 未接入）');
+    logEngine('已启动 2.x 面板（节点树 + Inspector + 暂停 + MCP P2）');
   }
 
   private createUI(): void {
@@ -107,14 +110,22 @@ export class CocosInspector2 {
     titleBlock.appendChild(version);
     headerTop.appendChild(titleBlock);
 
-    const mcpHint = document.createElement('div');
-    mcpHint.className = 'mcp-status mcp-status--disconnected';
-    mcpHint.title = '2.x P0 暂未接入 MCP 桥接';
-    mcpHint.innerHTML =
-      '<span class="mcp-status-dot" aria-hidden="true"></span><span class="mcp-status-label">MCP · 2.x 暂未接入</span>';
-    headerTop.appendChild(mcpHint);
+    this.mcpStatusEl = document.createElement('div');
+    this.mcpStatusEl.className = 'mcp-status mcp-status--disconnected';
+    this.mcpStatusEl.innerHTML =
+      '<span class="mcp-status-dot" aria-hidden="true"></span><span class="mcp-status-label">MCP</span>';
+    this.updateMcpStatus('disconnected', 17373);
+    headerTop.appendChild(this.mcpStatusEl);
 
     header.appendChild(headerTop);
+
+    window.addEventListener('message', (ev) => {
+      if (ev.source !== window || ev.data?.type !== 'cocos-mcp-status') return;
+      this.updateMcpStatus(
+        ev.data.status ?? 'disconnected',
+        ev.data.port ?? 17373
+      );
+    });
 
     const controls = document.createElement('div');
     controls.className = 'inspector-controls';
@@ -171,6 +182,26 @@ export class CocosInspector2 {
     this.panel.appendChild(mainBody);
     this.root.appendChild(this.panel);
     document.body.appendChild(this.root);
+  }
+
+  private updateMcpStatus(
+    status: 'connected' | 'disconnected' | string,
+    port: number
+  ): void {
+    if (!this.mcpStatusEl) return;
+    const labels: Record<string, string> = {
+      connected: '已连接',
+      disconnected: '未连接',
+    };
+    this.mcpStatusEl.className = `mcp-status mcp-status--${status}`;
+    const label = this.mcpStatusEl.querySelector('.mcp-status-label');
+    if (label) label.textContent = `MCP · ${labels[status] ?? status}`;
+    const hints: Record<string, string> = {
+      connected: `已连接 Cursor MCP 桥接（端口 ${port}，2.x P2）`,
+      disconnected:
+        `未连接 MCP。请在 Cursor 启用 cocos-inspector MCP，并确认端口 ${port} 可用。`,
+    };
+    this.mcpStatusEl.title = hints[status] ?? `MCP 状态: ${status}`;
   }
 
   private setCollapsed(collapsed: boolean): void {

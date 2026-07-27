@@ -58,6 +58,8 @@ export interface SceneSnapshot {
   exportedAt: string;
   pageUrl: string;
   engineVersion: string;
+  /** 引擎大系：2.x / 3.x（可选，旧快照可能缺失） */
+  engineFamily?: '2' | '3';
   sceneName: string;
   stats: {
     nodeCount: number;
@@ -250,6 +252,7 @@ export const exportSceneSnapshot = (
     exportedAt: new Date().toISOString(),
     pageUrl: window.location.href,
     engineVersion: String(window.cc?.ENGINE_VERSION ?? '3.x'),
+    engineFamily: '3',
     sceneName: scene.name || 'Scene',
     stats: {
       ...statsBase,
