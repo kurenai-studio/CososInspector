@@ -15,6 +15,9 @@ export interface ComponentInspectInfo {
   isCustom: boolean;
   isSpine: boolean;
   isBmfont: boolean;
+  isTtf: boolean;
+  isSystemFont: boolean;
+  isRichText: boolean;
   recoverClassName: string;
   spineIndex: number;
   bmfontIndex: number;
@@ -132,10 +135,41 @@ const isBmfontLabelComp = (comp: unknown, typeName: string): boolean => {
   return !!(fntConfig || /BitmapFont/.test(fontClass));
 };
 
+const isTtfLabelComp = (comp: unknown, typeName: string): boolean => {
+  if (!/Label/.test(typeName) || /RichText/.test(typeName)) return false;
+  if (isBmfontLabelComp(comp, typeName)) return false;
+  const c = comp as CompRecord;
+  const font = (c.font ?? c._font) as CompRecord | null | undefined;
+  if (!font) return false;
+  const fontClass = String(
+    (font as { __classname__?: string }).__classname__ ??
+      (font as { constructor?: { name?: string } }).constructor?.name ??
+      ''
+  );
+  return /TTFFont|TTF/.test(fontClass);
+};
+
+const isSystemFontLabelComp = (comp: unknown, typeName: string): boolean => {
+  if (!/Label/.test(typeName) || /RichText/.test(typeName)) return false;
+  if (isBmfontLabelComp(comp, typeName) || isTtfLabelComp(comp, typeName)) {
+    return false;
+  }
+  const c = comp as CompRecord;
+  const font = (c.font ?? c._font) as CompRecord | null | undefined;
+  const useSystem = !!(c.useSystemFont ?? c._isSystemFontUsed);
+  return useSystem || !font;
+};
+
 // 识别 Label 字体类型：位图字体(BMFont) / TTF / 系统字体
 const labelFontRows = (c: CompRecord): InspectRow[] => {
   const font = (c.font ?? c._font) as CompRecord | null | undefined;
-  const useSystem = c.useSystemFont ?? c._isSystemFontUsed;
+  const useSystem = !!(c.useSystemFont ?? c._isSystemFontUsed);
+  const fontFamily = String(
+    c.fontFamily ?? c._fontFamily ?? font?.fontFamily ?? font?._fontFamily ?? ''
+  );
+  const fontAssetName = font
+    ? String(font.name ?? font._name ?? '')
+    : '';
 
   const fontClass = font
     ? String(
@@ -161,12 +195,18 @@ const labelFontRows = (c: CompRecord): InspectRow[] => {
     const isTtf = !!font && /TTFFont|TTF/.test(fontClass);
     const type = font
       ? isTtf
-        ? 'TTF 字体'
+        ? 'TTF'
         : `字体(${shortTypeName(fontClass) || '未知'})`
       : useSystem
         ? '系统字体'
         : '系统字体(无字体资源)';
-    return [{ label: '字体', value: type }];
+    const rows: InspectRow[] = [
+      { label: '字体', value: type },
+      { label: '系统字体', value: useSystem || !font ? '是' : '否' },
+    ];
+    if (fontFamily) rows.push({ label: 'fontFamily', value: fontFamily });
+    if (fontAssetName) rows.push({ label: '字体名', value: fontAssetName });
+    return rows;
   }
 
   const spriteFrame = (font?.spriteFrame ?? font?._spriteFrame) as
@@ -186,7 +226,7 @@ const labelFontRows = (c: CompRecord): InspectRow[] => {
     (spriteFrame ? frameName(spriteFrame) : '-');
 
   return [
-    { label: '字体', value: 'BMFont（位图字体）' },
+    { label: '字体', value: 'BMFont' },
     { label: '字体名', value: String(fontName || '-') },
     {
       label: '图集',
@@ -252,26 +292,55 @@ const extractRows = (
   if (/Label/.test(typeName) && !/RichText/.test(typeName)) {
     const text = String(c.string ?? c._string ?? '');
     return [
+      { label: '文本', value: text || '(空)' },
+      { label: '字号', value: String(c.fontSize ?? c._fontSize ?? '-') },
+      { label: '行高', value: String(c.lineHeight ?? c._lineHeight ?? '-') },
+      { label: '颜色', value: readColor(c.color ?? c._color) },
+      { label: '溢出', value: String(c.overflow ?? c._overflow ?? '-') },
       {
-        label: '文本',
-        value: text.length > 48 ? `${text.slice(0, 48)}…` : text || '(空)',
+        label: '水平对齐',
+        value: String(c.horizontalAlign ?? c._horizontalAlign ?? '-'),
       },
-      { label: '字号', value: String(c.fontSize ?? '-') },
-      { label: '颜色', value: readColor(c.color) },
-      { label: '溢出', value: String(c.overflow ?? '-') },
+      {
+        label: '垂直对齐',
+        value: String(c.verticalAlign ?? c._verticalAlign ?? '-'),
+      },
       ...labelFontRows(c),
     ];
   }
 
   if (/RichText/.test(typeName)) {
     const text = String(c.string ?? c._string ?? '');
-    return [
+    const font = (c.font ?? c._font) as CompRecord | null | undefined;
+    const useSystem = !!(c.useSystemFont ?? c._isSystemFontUsed);
+    const fontFamily = String(
+      c.fontFamily ?? c._fontFamily ?? font?.fontFamily ?? ''
+    );
+    const rows: InspectRow[] = [
+      { label: '文本', value: text || '(空)' },
+      { label: '字号', value: String(c.fontSize ?? c._fontSize ?? '-') },
       {
-        label: '文本',
-        value: text.length > 48 ? `${text.slice(0, 48)}…` : text || '(空)',
+        label: '行高',
+        value: String(c.lineHeight ?? c._lineHeight ?? '-'),
       },
-      { label: '字号', value: String(c.fontSize ?? '-') },
+      {
+        label: 'maxWidth',
+        value: String(c.maxWidth ?? c._maxWidth ?? '-'),
+      },
+      {
+        label: '水平对齐',
+        value: String(c.horizontalAlign ?? c._horizontalAlign ?? '-'),
+      },
+      { label: '系统字体', value: useSystem || !font ? '是' : '否' },
     ];
+    if (fontFamily) rows.push({ label: 'fontFamily', value: fontFamily });
+    if (font) {
+      rows.push({
+        label: '字体名',
+        value: String(font.name ?? font._name ?? '-'),
+      });
+    }
+    return rows;
   }
 
   if (/Graphics/.test(typeName)) {
@@ -401,6 +470,9 @@ export const collectNodeInspectorData = (
 
     const isBmfont = isBmfontLabelComp(comp, typeName);
     const bmfontIndex = isBmfont ? bmfontCounter++ : -1;
+    const isTtf = isTtfLabelComp(comp, typeName);
+    const isSystemFont = isSystemFontLabelComp(comp, typeName);
+    const isRichText = /RichText/.test(typeName);
 
     components.push({
       typeName,
@@ -412,6 +484,9 @@ export const collectNodeInspectorData = (
       isCustom: isCustomComponentName(typeName),
       isSpine,
       isBmfont,
+      isTtf,
+      isSystemFont,
+      isRichText,
       recoverClassName: baseRecoverName,
       spineIndex,
       bmfontIndex,
@@ -464,12 +539,18 @@ export const renderNodeInspectorHtml = (
   const blocks = data.components
     .map((comp) => {
       const rows = comp.rows
-        .map(
-          (r) =>
-            `<div class="insp-row"><span class="insp-label">${escapeHtml(
-              r.label
-            )}</span><span class="insp-value">${escapeHtml(r.value)}</span></div>`
-        )
+        .map((r) => {
+          let display = r.value;
+          if (
+            (r.label === '文本' || r.label === 'string') &&
+            display.length > 48
+          ) {
+            display = `${display.slice(0, 48)}…`;
+          }
+          return `<div class="insp-row"><span class="insp-label">${escapeHtml(
+            r.label
+          )}</span><span class="insp-value">${escapeHtml(display)}</span></div>`;
+        })
         .join('');
 
       const preview = comp.isSprite

@@ -28,6 +28,9 @@ export interface SceneComponentSnapshot {
     isSprite: boolean;
     isSpine: boolean;
     isBmfont?: boolean;
+    isTtf?: boolean;
+    isSystemFont?: boolean;
+    isRichText?: boolean;
     isCustom: boolean;
     spineIndex: number;
     bmfontIndex?: number;
@@ -202,6 +205,9 @@ const buildNodeSnapshot = (
         isSprite: c.isSprite,
         isSpine: c.isSpine,
         isBmfont: c.isBmfont,
+        isTtf: c.isTtf,
+        isSystemFont: c.isSystemFont,
+        isRichText: c.isRichText,
         isCustom: c.isCustom,
         spineIndex: c.spineIndex,
         bmfontIndex: c.bmfontIndex,

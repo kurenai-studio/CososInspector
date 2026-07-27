@@ -156,7 +156,7 @@ export const collectUiSizeBindings = (snapshotRoot, pathMap) => {
   return bindings;
 };
 
-/** 从组件行解析 Label（中英标签） */
+/** 从组件行解析 Label（中英标签；含 TTF/系统字体元数据） */
 export const parseLabelFromNode = (ch) => {
   const lab = (ch.components || []).find(
     (c) => /Label/.test(c.typeName || '') && !/RichText/.test(c.typeName || '')
@@ -167,6 +167,12 @@ export const parseLabelFromNode = (ch) => {
   const lineRow = findCompRow(lab.rows, '行高', 'lineHeight');
   const colorRow = findCompRow(lab.rows, '颜色', 'color');
   const overflowRow = findCompRow(lab.rows, '溢出', 'overflow');
+  const hAlignRow = findCompRow(lab.rows, '水平对齐', 'horizontalAlign');
+  const vAlignRow = findCompRow(lab.rows, '垂直对齐', 'verticalAlign');
+  const fontKindRow = findCompRow(lab.rows, '字体');
+  const sysRow = findCompRow(lab.rows, '系统字体', 'useSystemFont');
+  const familyRow = findCompRow(lab.rows, 'fontFamily');
+  const fontNameRow = findCompRow(lab.rows, '字体名');
   let text = String(textRow?.value ?? '');
   if (text === '(空)') text = '';
   if (text.endsWith('…')) {
@@ -176,26 +182,94 @@ export const parseLabelFromNode = (ch) => {
   const fontSize = parseFloat(String(fontRow?.value ?? ''));
   const lineHeight = parseFloat(String(lineRow?.value ?? ''));
   const overflow = parseInt(String(overflowRow?.value ?? ''), 10);
+  const horizontalAlign = parseInt(String(hAlignRow?.value ?? ''), 10);
+  const verticalAlign = parseInt(String(vAlignRow?.value ?? ''), 10);
   let color = null;
   if (colorRow?.value && colorRow.value !== '-') {
     const m = String(colorRow.value).match(
       /(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*(\d+))?/
     );
     if (m) {
+      const aRaw = m[4] != null ? +m[4] : 255;
       color = {
         r: +m[1],
         g: +m[2],
         b: +m[3],
-        a: m[4] != null ? +m[4] : 255,
+        a: aRaw <= 1 ? Math.round(aRaw * 255) : Math.round(aRaw),
       };
     }
   }
+  const fontKindRaw = String(fontKindRow?.value ?? '');
+  const fontKind = /BMFont/i.test(fontKindRaw)
+    ? 'bmfont'
+    : /TTF/i.test(fontKindRaw)
+      ? 'ttf'
+      : /系统/i.test(fontKindRaw)
+        ? 'system'
+        : lab.flags?.isBmfont
+          ? 'bmfont'
+          : lab.flags?.isTtf
+            ? 'ttf'
+            : 'system';
+  const useSystemFont =
+    sysRow?.value === '是' ||
+    lab.flags?.isSystemFont === true ||
+    fontKind === 'system';
+  const fontFamily =
+    familyRow?.value && familyRow.value !== '-'
+      ? String(familyRow.value)
+      : '';
+  const fontName =
+    fontNameRow?.value && fontNameRow.value !== '-'
+      ? String(fontNameRow.value)
+      : '';
   return {
     string: text,
     fontSize: Number.isFinite(fontSize) ? fontSize : null,
     lineHeight: Number.isFinite(lineHeight) ? lineHeight : null,
     overflow: Number.isFinite(overflow) ? overflow : null,
+    horizontalAlign: Number.isFinite(horizontalAlign) ? horizontalAlign : null,
+    verticalAlign: Number.isFinite(verticalAlign) ? verticalAlign : null,
     color,
+    fontKind,
+    useSystemFont,
+    fontFamily,
+    fontName,
+  };
+};
+
+/** 解析 RichText 占位字段 */
+export const parseRichTextFromNode = (ch) => {
+  const rt = (ch.components || []).find(
+    (c) =>
+      c.flags?.isRichText || /RichText/.test(c.typeName || '')
+  );
+  if (!rt?.rows?.length) return null;
+  const textRow = findCompRow(rt.rows, '文本', 'string');
+  const fontRow = findCompRow(rt.rows, '字号', 'fontSize');
+  const lineRow = findCompRow(rt.rows, '行高', 'lineHeight');
+  const maxRow = findCompRow(rt.rows, 'maxWidth');
+  const hAlignRow = findCompRow(rt.rows, '水平对齐', 'horizontalAlign');
+  const sysRow = findCompRow(rt.rows, '系统字体', 'useSystemFont');
+  const familyRow = findCompRow(rt.rows, 'fontFamily');
+  let text = String(textRow?.value ?? '');
+  if (text === '(空)') text = '';
+  if (text.endsWith('…')) text = text.slice(0, -1);
+  const fontSize = parseFloat(String(fontRow?.value ?? ''));
+  const lineHeight = parseFloat(String(lineRow?.value ?? ''));
+  const maxWidth = parseFloat(String(maxRow?.value ?? ''));
+  const horizontalAlign = parseInt(String(hAlignRow?.value ?? ''), 10);
+  return {
+    string: text,
+    fontSize: Number.isFinite(fontSize) ? fontSize : null,
+    lineHeight: Number.isFinite(lineHeight) ? lineHeight : null,
+    maxWidth: Number.isFinite(maxWidth) ? maxWidth : null,
+    horizontalAlign: Number.isFinite(horizontalAlign) ? horizontalAlign : null,
+    useSystemFont: sysRow?.value !== '否',
+    fontFamily:
+      familyRow?.value && familyRow.value !== '-'
+        ? String(familyRow.value)
+        : '',
   };
 };
 

@@ -1,6 +1,6 @@
 # Cocos Creator 2.x（含 2.4）支持
 
-> 状态：**P0–P7 已落地**。P7 = 同节点多 Spine/BMFont（index > 0）。
+> 状态：**P0–P8a 已落地**。P8a = Label TTF/系统字体元数据 + RichText 占位。
 
 ## 能力矩阵
 
@@ -11,6 +11,13 @@
 | Spine / BMFont 自动绑入 | ✓ | ✓ P4b |
 | MCP list/download Spine·BMFont | ✓ | ✓ P5 |
 | 同节点多 Spine/BMFont（index>0） | ✓ | ✓ P7 |
+| Label 系统字体/对齐 + RichText 占位 | ✓ | ✓ P8a |
+
+## P8a：TTF / RichText 占位
+
+- 快照：Label 写入 `字体`/`系统字体`/`fontFamily`/对齐；RichText 写入文本/字号/行高/maxWidth  
+- 复刻：非 BMFont Label 强制 `useSystemFont`（保证可见）；`applyRichText` 建 `cc.RichText`  
+- **未做**：TTF 二进制导出与 `cc.TTFFont` 绑定（P8b）
 
 ## P7：多组件 index
 

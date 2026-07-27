@@ -767,25 +767,103 @@ function parseLabelFromNode(ch) {
   const lineRow = findRow(lab.rows, ['行高', 'lineHeight']);
   const colorRow = findRow(lab.rows, ['颜色', 'color']);
   const overflowRow = findRow(lab.rows, ['溢出', 'overflow']);
+  const hAlignRow = findRow(lab.rows, ['水平对齐', 'horizontalAlign']);
+  const vAlignRow = findRow(lab.rows, ['垂直对齐', 'verticalAlign']);
+  const fontKindRow = findRow(lab.rows, ['字体']);
+  const sysRow = findRow(lab.rows, ['系统字体', 'useSystemFont']);
+  const familyRow = findRow(lab.rows, ['fontFamily']);
+  const fontNameRow = findRow(lab.rows, ['字体名']);
   let text = String(textRow?.value ?? '');
   if (text === '(空)') text = '';
   if (text.endsWith('…')) text = text.slice(0, -1);
   const fontSize = parseFloat(String(fontRow?.value ?? ''));
   const lineHeight = parseFloat(String(lineRow?.value ?? ''));
   const overflow = parseInt(String(overflowRow?.value ?? ''), 10);
+  const horizontalAlign = parseInt(String(hAlignRow?.value ?? ''), 10);
+  const verticalAlign = parseInt(String(vAlignRow?.value ?? ''), 10);
   let color = null;
   if (colorRow?.value && colorRow.value !== '-') {
-    const m = String(colorRow.value).match(
-      /(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)\\s*(?:,\\s*(\\d+))?/
+    const raw = String(colorRow.value);
+    const m = raw.match(
+      /(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*(\d+(?:\.\d+)?))?/
     );
-    if (m) color = { r: +m[1], g: +m[2], b: +m[3], a: m[4] != null ? +m[4] : 255 };
+    if (m) {
+      const aRaw = m[4] != null ? +m[4] : 255;
+      color = {
+        r: +m[1],
+        g: +m[2],
+        b: +m[3],
+        a: aRaw <= 1 ? Math.round(aRaw * 255) : Math.round(aRaw),
+      };
+    }
   }
+  const fontKindRaw = String(fontKindRow?.value ?? '');
+  const fontKind = /BMFont/i.test(fontKindRaw)
+    ? 'bmfont'
+    : /TTF/i.test(fontKindRaw)
+      ? 'ttf'
+      : /系统/i.test(fontKindRaw)
+        ? 'system'
+        : lab.flags?.isBmfont
+          ? 'bmfont'
+          : lab.flags?.isTtf
+            ? 'ttf'
+            : 'system';
+  const useSystemFont =
+    sysRow?.value === '是' ||
+    lab.flags?.isSystemFont === true ||
+    fontKind === 'system';
   return {
     string: text,
     fontSize: Number.isFinite(fontSize) ? fontSize : null,
     lineHeight: Number.isFinite(lineHeight) ? lineHeight : null,
     overflow: Number.isFinite(overflow) ? overflow : null,
+    horizontalAlign: Number.isFinite(horizontalAlign) ? horizontalAlign : null,
+    verticalAlign: Number.isFinite(verticalAlign) ? verticalAlign : null,
     color,
+    fontKind,
+    useSystemFont,
+    fontFamily:
+      familyRow?.value && familyRow.value !== '-'
+        ? String(familyRow.value)
+        : '',
+    fontName:
+      fontNameRow?.value && fontNameRow.value !== '-'
+        ? String(fontNameRow.value)
+        : '',
+  };
+}
+
+function parseRichTextFromNode(ch) {
+  const rt = (ch.components || []).find(
+    (c) => c.flags?.isRichText || /RichText/.test(c.typeName || '')
+  );
+  if (!rt?.rows?.length) return null;
+  const textRow = findRow(rt.rows, ['文本', 'string']);
+  const fontRow = findRow(rt.rows, ['字号', 'fontSize']);
+  const lineRow = findRow(rt.rows, ['行高', 'lineHeight']);
+  const maxRow = findRow(rt.rows, ['maxWidth']);
+  const hAlignRow = findRow(rt.rows, ['水平对齐', 'horizontalAlign']);
+  const sysRow = findRow(rt.rows, ['系统字体', 'useSystemFont']);
+  const familyRow = findRow(rt.rows, ['fontFamily']);
+  let text = String(textRow?.value ?? '');
+  if (text === '(空)') text = '';
+  if (text.endsWith('…')) text = text.slice(0, -1);
+  const fontSize = parseFloat(String(fontRow?.value ?? ''));
+  const lineHeight = parseFloat(String(lineRow?.value ?? ''));
+  const maxWidth = parseFloat(String(maxRow?.value ?? ''));
+  const horizontalAlign = parseInt(String(hAlignRow?.value ?? ''), 10);
+  return {
+    string: text,
+    fontSize: Number.isFinite(fontSize) ? fontSize : null,
+    lineHeight: Number.isFinite(lineHeight) ? lineHeight : null,
+    maxWidth: Number.isFinite(maxWidth) ? maxWidth : null,
+    horizontalAlign: Number.isFinite(horizontalAlign) ? horizontalAlign : null,
+    useSystemFont: sysRow?.value !== '否',
+    fontFamily:
+      familyRow?.value && familyRow.value !== '-'
+        ? String(familyRow.value)
+        : '',
   };
 }
 
@@ -865,56 +943,38 @@ async function applyLabel(nodeUuid, ch) {
   const lab = parseLabelFromNode(ch);
   if (!lab) return false;
   await ensureComponent(nodeUuid, 'cc.Label');
-  try {
-    await Editor.Message.request('scene', 'set-property', {
-      uuid: nodeUuid,
-      path: 'cc.Label.string',
-      dump: { value: lab.string },
-    });
-  } catch (_) {}
-  if (lab.fontSize != null) {
+  const setVal = async (path, value, type) => {
     try {
       await Editor.Message.request('scene', 'set-property', {
         uuid: nodeUuid,
-        path: 'cc.Label.fontSize',
-        dump: { value: lab.fontSize },
+        path,
+        dump: type ? { type, value } : { value },
       });
     } catch (_) {}
+  };
+  await setVal('cc.Label.string', lab.string);
+  if (lab.fontSize != null) await setVal('cc.Label.fontSize', lab.fontSize);
+  if (lab.lineHeight != null) await setVal('cc.Label.lineHeight', lab.lineHeight);
+  if (lab.overflow != null) await setVal('cc.Label.overflow', lab.overflow);
+  if (lab.horizontalAlign != null) {
+    await setVal('cc.Label.horizontalAlign', lab.horizontalAlign);
   }
-  if (lab.lineHeight != null) {
-    try {
-      await Editor.Message.request('scene', 'set-property', {
-        uuid: nodeUuid,
-        path: 'cc.Label.lineHeight',
-        dump: { value: lab.lineHeight },
-      });
-    } catch (_) {}
+  if (lab.verticalAlign != null) {
+    await setVal('cc.Label.verticalAlign', lab.verticalAlign);
   }
-  if (lab.overflow != null) {
-    try {
-      await Editor.Message.request('scene', 'set-property', {
-        uuid: nodeUuid,
-        path: 'cc.Label.overflow',
-        dump: { value: lab.overflow },
-      });
-    } catch (_) {}
+  if (lab.color) await setVal('cc.Label.color', lab.color, 'cc.Color');
+
+  // 非 BMFont：P8a 用系统字体保证可见（TTF 二进制 P8b）
+  if (lab.fontKind !== 'bmfont') {
+    await setVal('cc.Label.useSystemFont', true);
+    if (lab.fontFamily) await setVal('cc.Label.fontFamily', lab.fontFamily);
   }
-  if (lab.color) {
-    try {
-      await Editor.Message.request('scene', 'set-property', {
-        uuid: nodeUuid,
-        path: 'cc.Label.color',
-        dump: {
-          type: 'cc.Color',
-          value: lab.color,
-        },
-      });
-    } catch (_) {}
-  }
+
   const fontEntry = lookupManifestEntry(bmfontManifest, ch.id, 0);
   if (fontEntry?.dbUrl) {
     try {
       const fontUuid = await resolveAssetUuid(fontEntry.dbUrl);
+      await setVal('cc.Label.useSystemFont', false);
       await Editor.Message.request('scene', 'set-property', {
         uuid: nodeUuid,
         path: 'cc.Label.font',
@@ -946,6 +1006,31 @@ async function applyLabel(nodeUuid, ch) {
       });
     } catch (_) {}
   }
+  return true;
+}
+
+async function applyRichText(nodeUuid, ch) {
+  const rt = parseRichTextFromNode(ch);
+  if (!rt) return false;
+  await ensureComponent(nodeUuid, 'cc.RichText');
+  const setVal = async (path, value) => {
+    try {
+      await Editor.Message.request('scene', 'set-property', {
+        uuid: nodeUuid,
+        path,
+        dump: { value },
+      });
+    } catch (_) {}
+  };
+  await setVal('cc.RichText.string', rt.string);
+  if (rt.fontSize != null) await setVal('cc.RichText.fontSize', rt.fontSize);
+  if (rt.lineHeight != null) await setVal('cc.RichText.lineHeight', rt.lineHeight);
+  if (rt.maxWidth != null) await setVal('cc.RichText.maxWidth', rt.maxWidth);
+  if (rt.horizontalAlign != null) {
+    await setVal('cc.RichText.horizontalAlign', rt.horizontalAlign);
+  }
+  await setVal('cc.RichText.useSystemFont', rt.useSystemFont !== false);
+  if (rt.fontFamily) await setVal('cc.RichText.fontFamily', rt.fontFamily);
   return true;
 }
 
@@ -1117,6 +1202,7 @@ const spritesBound = [];
 const spriteBindings = [];
 const uiSizeBindings = [];
 const labelsApplied = [];
+const richTextsApplied = [];
 const widgetsApplied = [];
 const spinesApplied = [];
 const spineBindings = [];
@@ -1203,8 +1289,11 @@ async function walk(src, parentUuid, depth) {
       recordUiBinding(uiSizeBindings, nodeUuid, uiParsed);
     }
 
-    // Label / Widget / Spine 占位（可与 Sprite 同节点）
+    // Label / RichText / Widget / Spine 占位（可与 Sprite 同节点）
     if (await applyLabel(nodeUuid, ch)) labelsApplied.push(ch.path || ch.name);
+    if (await applyRichText(nodeUuid, ch)) {
+      richTextsApplied.push(ch.path || ch.name);
+    }
     if (await applyWidget(nodeUuid, ch)) widgetsApplied.push(ch.path || ch.name);
     if (await applySpinePlaceholder(nodeUuid, ch)) spinesApplied.push(ch.path || ch.name);
 
@@ -1228,6 +1317,7 @@ return {
   createdCount: created.length,
   spritesBoundCount: spritesBound.length,
   labelsAppliedCount: labelsApplied.length,
+  richTextsAppliedCount: richTextsApplied.length,
   widgetsAppliedCount: widgetsApplied.length,
   spinesAppliedCount: spinesApplied.length,
   spineBindings,
@@ -1237,6 +1327,7 @@ return {
   createdSample: created.slice(0, 15),
   spritesBoundSample: spritesBound.slice(0, 15),
   labelsSample: labelsApplied.slice(0, 10),
+  richTextsSample: richTextsApplied.slice(0, 10),
   widgetsSample: widgetsApplied.slice(0, 10),
   spinesSample: spinesApplied.slice(0, 10),
   diskSize,

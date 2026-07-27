@@ -20,6 +20,9 @@ export interface ComponentInspectInfo {
   isSprite: boolean;
   isSpine: boolean;
   isBmfont: boolean;
+  isTtf: boolean;
+  isSystemFont: boolean;
+  isRichText: boolean;
   spineIndex: number;
   bmfontIndex: number;
 }
@@ -141,11 +144,62 @@ const inspectComponent = (comp: unknown): ComponentInspectInfo => {
     push('溢出', c.overflow ?? c._overflow ?? c.Overflow);
     push('水平对齐', c.horizontalAlign ?? c._N$horizontalAlign);
     push('垂直对齐', c.verticalAlign ?? c._N$verticalAlign);
+
+    const font = (c.font ?? c._font ?? c._N$file) as
+      | {
+          name?: string;
+          _name?: string;
+          fontFamily?: string;
+          _fontFamily?: string;
+          fntConfig?: unknown;
+          _fntConfig?: unknown;
+          __classname__?: string;
+        }
+      | null
+      | undefined;
+    const useSystem = !!(c.useSystemFont ?? c._isSystemFontUsed);
+    const fontClass = String(font?.__classname__ ?? '');
+    const isBm =
+      !!font &&
+      !!(
+        font.fntConfig ||
+        font._fntConfig ||
+        /BitmapFont/i.test(fontClass)
+      );
+    const isTtf = !!font && !isBm && /TTFFont|TTF/i.test(fontClass);
+    const fontFamily = String(
+      c.fontFamily ?? c._fontFamily ?? font?.fontFamily ?? font?._fontFamily ?? ''
+    );
+    if (isBm) {
+      push('字体', 'BMFont');
+      push('字体名', font?.name ?? font?._name ?? '-');
+    } else if (isTtf) {
+      push('字体', 'TTF');
+      push('系统字体', useSystem ? '是' : '否');
+      if (fontFamily) push('fontFamily', fontFamily);
+      push('字体名', font?.name ?? font?._name ?? '-');
+    } else {
+      push('字体', useSystem || !font ? '系统字体' : '系统字体(无字体资源)');
+      push('系统字体', '是');
+      if (fontFamily) push('fontFamily', fontFamily);
+    }
   }
   if (/RichText/i.test(shortName)) {
     const text = String(c.string ?? c._string ?? '');
     push('文本', text || '(空)');
     push('字号', c.fontSize ?? c._fontSize);
+    push('行高', c.lineHeight ?? c._lineHeight);
+    push('maxWidth', c.maxWidth ?? c._maxWidth);
+    push('水平对齐', c.horizontalAlign ?? c._N$horizontalAlign);
+    const font = (c.font ?? c._font ?? c._N$file) as
+      | { name?: string; _name?: string; __classname__?: string }
+      | null
+      | undefined;
+    const useSystem = !!(c.useSystemFont ?? c._isSystemFontUsed);
+    push('系统字体', useSystem || !font ? '是' : '否');
+    const fontFamily = String(c.fontFamily ?? c._fontFamily ?? '');
+    if (fontFamily) push('fontFamily', fontFamily);
+    if (font) push('字体名', font.name ?? font._name ?? '-');
   }
   if (/Mask/i.test(shortName)) {
     push('类型', c._type ?? c.type ?? 0);
@@ -204,9 +258,10 @@ const inspectComponent = (comp: unknown): ComponentInspectInfo => {
 
   const isSpine =
     /Spine|Skeleton/i.test(shortName) && !/Sprite|SkeletonData/i.test(shortName);
+  const isRichText = /RichText/i.test(shortName);
   const isBmfont = (() => {
-    if (!/Label/i.test(shortName) || /RichText/i.test(shortName)) return false;
-    const font = (c.font ?? c._font) as
+    if (!/Label/i.test(shortName) || isRichText) return false;
+    const font = (c.font ?? c._font ?? c._N$file) as
       | { fntConfig?: unknown; _fntConfig?: unknown; __classname__?: string }
       | null
       | undefined;
@@ -217,6 +272,23 @@ const inspectComponent = (comp: unknown): ComponentInspectInfo => {
       /BitmapFont/i.test(font.__classname__ ?? '')
     );
   })();
+  const isTtf = (() => {
+    if (!/Label/i.test(shortName) || isRichText || isBmfont) return false;
+    const font = (c.font ?? c._font ?? c._N$file) as
+      | { __classname__?: string }
+      | null
+      | undefined;
+    if (!font) return false;
+    return /TTFFont|TTF/i.test(font.__classname__ ?? '');
+  })();
+  const isSystemFont = (() => {
+    if (!/Label/i.test(shortName) || isRichText || isBmfont || isTtf) {
+      return false;
+    }
+    const font = c.font ?? c._font ?? c._N$file;
+    const useSystem = !!(c.useSystemFont ?? c._isSystemFontUsed);
+    return useSystem || !font;
+  })();
 
   return {
     typeName,
@@ -226,6 +298,9 @@ const inspectComponent = (comp: unknown): ComponentInspectInfo => {
     isSprite,
     isSpine,
     isBmfont,
+    isTtf,
+    isSystemFont,
+    isRichText,
     spineIndex: 0,
     bmfontIndex: 0,
   };
