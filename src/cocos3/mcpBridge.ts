@@ -10,6 +10,14 @@ import {
   getSceneTreeLite,
   type SceneSnapshot,
 } from './sceneSnapshot';
+import {
+  getPauseState,
+  pauseGame as pauseGameImpl,
+  resumeGame as resumeGameImpl,
+  togglePause as togglePauseImpl,
+  type PauseMode,
+  type PauseState,
+} from './gamePause';
 import { findNodeById, getSceneRoot, setNodeActive } from './sceneTree';
 import {
   exportSpritePngBase64,
@@ -37,6 +45,7 @@ import {
   getTextureExtractLogs,
   type TextureExtractLogEntry,
 } from './textureExtractLog';
+import { clearTexturePixelCache } from './textureExtract';
 import { readVisibleSpriteFromScreen } from './textureWebGL';
 
 export interface SerializableSpriteDetail {
@@ -154,6 +163,8 @@ async function buildTextureDownload(
     path?: SpriteExportPath;
   }
 ): Promise<TextureDownloadResult> {
+  // 避免脏缓存（空 uuid 碰撞 / 旧错误 bake）污染本次导出
+  clearTexturePixelCache();
   const base = collectSpriteInspectData(nodeId);
   if (!base) return { ok: false, error: '节点无 Sprite' };
   const requested = options?.path ?? 'auto';
@@ -223,14 +234,39 @@ export const cocosInspectorMcpApi = {
     engineVersion: string;
     sceneName: string;
     hasCocos: boolean;
+    paused: boolean;
+    pause: PauseState;
   } {
     const scene = getSceneRoot();
+    const pause = getPauseState();
     return {
       pageUrl: window.location.href,
       engineVersion: String(window.cc?.ENGINE_VERSION ?? '3.x'),
       sceneName: scene?.name ?? '',
       hasCocos: !!window.cc,
+      paused: pause.paused,
+      pause,
     };
+  },
+
+  pauseGame(
+    mode?: PauseMode
+  ): { ok: true; state: PauseState } | { ok: false; error: string } {
+    return pauseGameImpl(mode ?? 'director');
+  },
+
+  resumeGame(): { ok: true; state: PauseState } | { ok: false; error: string } {
+    return resumeGameImpl();
+  },
+
+  togglePause(
+    mode?: PauseMode
+  ): { ok: true; state: PauseState } | { ok: false; error: string } {
+    return togglePauseImpl(mode);
+  },
+
+  getPauseState(): PauseState {
+    return getPauseState();
   },
 
   setNodeActive(
@@ -341,6 +377,11 @@ export const cocosInspectorMcpApi = {
   clearTextureExtractLogs(): { ok: true; cleared: number } {
     const { cleared } = clearTextureExtractLogs();
     return { ok: true, cleared };
+  },
+
+  clearTexturePixelCache(): { ok: true } {
+    clearTexturePixelCache();
+    return { ok: true };
   },
 
   async replaceTexture(

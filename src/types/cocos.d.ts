@@ -18,9 +18,18 @@ declare namespace cc {
 
   interface Director {
     getScene(): Node | null;
+    pause?: () => void;
+    resume?: () => void;
+    isPaused?: () => boolean;
+  }
+
+  interface Game {
+    pause?: () => void;
+    resume?: () => void;
   }
 
   const director: Director;
+  const game?: Game;
   const ENGINE_VERSION: string;
 }
 

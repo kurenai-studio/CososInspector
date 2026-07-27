@@ -59,7 +59,7 @@ export function patchSpriteFramesOnDisk(sceneAbs, bindings) {
 
 /** 补丁 UITransform contentSize（set-property 可能未落盘） */
 export function patchUiSizesOnDisk(sceneAbs, bindings) {
-  if (!bindings?.length) return { patched: 0 };
+  if (!bindings?.length) return { patched: 0, missingUi: 0 };
   const scene = JSON.parse(fs.readFileSync(sceneAbs, 'utf8'));
   const byId = indexScene(scene);
   const nodeByUuid = new Map();
@@ -70,25 +70,71 @@ export function patchUiSizesOnDisk(sceneAbs, bindings) {
   }
 
   let patched = 0;
+  let missingUi = 0;
   for (const b of bindings) {
     if (!Number.isFinite(b.width) || !Number.isFinite(b.height)) continue;
     const node = nodeByUuid.get(b.nodeUuid);
-    if (!node?._components) continue;
+    if (!node) continue;
+    if (!node._components) node._components = [];
+
+    let uiComp = null;
+    let uiCompIdx = -1;
     for (const cref of node._components) {
       const comp = byId.get(cref.__id__);
       if (comp?.__type__ === 'cc.UITransform') {
-        comp._contentSize = {
+        uiComp = comp;
+        uiCompIdx = cref.__id__;
+        break;
+      }
+    }
+
+    // 容器节点重建时可能没有 UITransform，按快照尺寸补上
+    if (!uiComp) {
+      const nodeIdx = scene.indexOf(node);
+      uiCompIdx = scene.length;
+      uiComp = {
+        __type__: 'cc.UITransform',
+        _name: '',
+        _objFlags: 0,
+        __editorExtras__: {},
+        node: { __id__: nodeIdx },
+        _enabled: true,
+        __prefab: null,
+        _contentSize: {
           __type__: 'cc.Size',
           width: b.width,
           height: b.height,
+        },
+        _anchorPoint: {
+          __type__: 'cc.Vec2',
+          x: Number.isFinite(b.anchorX) ? b.anchorX : 0.5,
+          y: Number.isFinite(b.anchorY) ? b.anchorY : 0.5,
+        },
+        _id: '',
+      };
+      scene.push(uiComp);
+      byId.set(uiCompIdx, uiComp);
+      node._components.unshift({ __id__: uiCompIdx });
+      missingUi += 1;
+    } else {
+      uiComp._contentSize = {
+        __type__: 'cc.Size',
+        width: b.width,
+        height: b.height,
+      };
+      if (Number.isFinite(b.anchorX) && Number.isFinite(b.anchorY)) {
+        uiComp._anchorPoint = {
+          __type__: 'cc.Vec2',
+          x: b.anchorX,
+          y: b.anchorY,
         };
-        patched += 1;
       }
     }
+    patched += 1;
   }
 
   fs.writeFileSync(sceneAbs, `${JSON.stringify(scene, null, 2)}\n`, 'utf8');
-  return { patched };
+  return { patched, missingUi };
 }
 
 /**
@@ -317,29 +363,67 @@ export function patchMasksOnDisk(sceneAbs, targets) {
 }
 
 /**
- * 为 UICamera 添加 Camera、Canvas 关联相机，Canvas 子树改 UI 层
+ * 为 UI 相机补 cc.Camera，并挂到 Canvas（或 RSG 的 GameLayer）。
+ * 兼容节点名：UICamera / Camera；Canvas / GameLayer（带 cc.Canvas）。
  */
-export function patchCanvasCameraOnDisk(sceneAbs, designHeight = 720) {
+export function patchCanvasCameraOnDisk(
+  sceneAbs,
+  designHeight = 720,
+  designWidth = 1280
+) {
   const scene = JSON.parse(fs.readFileSync(sceneAbs, 'utf8'));
   const byId = indexScene(scene);
 
+  const isCamName = (n) => /^(UI)?Camera$/i.test(String(n || ''));
+  const isCanvasHostName = (n) => /^(Canvas|GameLayer)$/i.test(String(n || ''));
+
   let uiCamNode = null;
-  let canvasNode = null;
   let uiCamIdx = -1;
+  let canvasNode = null;
   let canvasIdx = -1;
+
   scene.forEach((obj, idx) => {
     if (obj.__type__ !== 'cc.Node') return;
-    if (obj._name === 'UICamera') {
+    if (!uiCamNode && isCamName(obj._name)) {
       uiCamNode = obj;
       uiCamIdx = idx;
     }
-    if (obj._name === 'Canvas') {
+    if (!canvasNode && isCanvasHostName(obj._name)) {
       canvasNode = obj;
       canvasIdx = idx;
     }
   });
+
+  // 已有 cc.Canvas 的节点优先作为宿主
+  if (!canvasNode) {
+    for (let idx = 0; idx < scene.length; idx += 1) {
+      const obj = scene[idx];
+      if (obj?.__type__ !== 'cc.Canvas' || obj.node?.__id__ == null) continue;
+      const host = byId.get(obj.node.__id__);
+      if (host?.__type__ === 'cc.Node') {
+        canvasNode = host;
+        canvasIdx = obj.node.__id__;
+        break;
+      }
+    }
+  }
+
+  // Camera 的父节点常是 GameLayer / Canvas
+  if (!canvasNode && uiCamNode?._parent?.__id__ != null) {
+    const parent = byId.get(uiCamNode._parent.__id__);
+    if (parent?.__type__ === 'cc.Node' && parent._name !== 'Scene') {
+      canvasNode = parent;
+      canvasIdx = uiCamNode._parent.__id__;
+    }
+  }
+
   if (!uiCamNode || !canvasNode || uiCamIdx < 0 || canvasIdx < 0) {
-    return { ok: false, error: 'UICamera or Canvas not found' };
+    return {
+      ok: false,
+      error: 'Camera or Canvas/GameLayer not found',
+      camName: uiCamNode?._name ?? null,
+      canvasName: canvasNode?._name ?? null,
+    };
   }
 
   let camComp = null;
@@ -364,13 +448,13 @@ export function patchCanvasCameraOnDisk(sceneAbs, designHeight = 720) {
       _enabled: true,
       __prefab: null,
       _projection: 0,
-      _priority: 1073741824,
+      _priority: 0,
       _fov: 45,
       _fovAxis: 0,
       _orthoHeight: designHeight / 2,
       _near: 0,
       _far: 2000,
-      _color: { __type__: 'cc.Color', r: 0, g: 0, b: 0, a: 255 },
+      _color: { __type__: 'cc.Color', r: 51, g: 51, b: 51, a: 255 },
       _depth: 1,
       _stencil: 0,
       _clearFlags: 7,
@@ -385,36 +469,102 @@ export function patchCanvasCameraOnDisk(sceneAbs, designHeight = 720) {
       _usePostProcess: false,
       _cameraType: -1,
       _trackingType: 0,
-      __id__: newId,
     };
     scene.push(camComp);
+    byId.set(newId, camComp);
     if (!uiCamNode._components) uiCamNode._components = [];
     uiCamNode._components.push({ __id__: newId });
-    // 去掉误加的 UITransform
     uiCamNode._components = uiCamNode._components.filter((cref) => {
       const comp = byId.get(cref.__id__);
       return comp?.__type__ !== 'cc.UITransform';
     });
+  } else {
+    camComp._orthoHeight = designHeight / 2;
+    camComp._visibility = camComp._visibility || 41943040;
+    camComp._projection = 0;
   }
 
-  const canvasId = canvasIdx;
-  for (const obj of scene) {
-    if (obj.__type__ === 'cc.Canvas' && obj.node?.__id__ === canvasId) {
-      obj._cameraComponent = { __id__: camCompIdx };
-    }
+  // Canvas 宿主：补 UITransform + Canvas，并关联相机
+  let uiComp = null;
+  let canvasComp = null;
+  for (const cref of canvasNode._components ?? []) {
+    const comp = byId.get(cref.__id__);
+    if (comp?.__type__ === 'cc.UITransform') uiComp = comp;
+    if (comp?.__type__ === 'cc.Canvas') canvasComp = comp;
+  }
+  if (!canvasNode._components) canvasNode._components = [];
+
+  if (!uiComp) {
+    const id = scene.length;
+    uiComp = {
+      __type__: 'cc.UITransform',
+      _name: '',
+      _objFlags: 0,
+      __editorExtras__: {},
+      node: { __id__: canvasIdx },
+      _enabled: true,
+      __prefab: null,
+      _contentSize: {
+        __type__: 'cc.Size',
+        width: designWidth,
+        height: designHeight,
+      },
+      _anchorPoint: { __type__: 'cc.Vec2', x: 0.5, y: 0.5 },
+      _id: '',
+    };
+    scene.push(uiComp);
+    byId.set(id, uiComp);
+    canvasNode._components.unshift({ __id__: id });
+  } else {
+    uiComp._contentSize = {
+      __type__: 'cc.Size',
+      width: designWidth,
+      height: designHeight,
+    };
   }
 
-  canvasNode._layer = 33554432;
+  if (!canvasComp) {
+    const id = scene.length;
+    canvasComp = {
+      __type__: 'cc.Canvas',
+      _name: '',
+      _objFlags: 0,
+      __editorExtras__: {},
+      node: { __id__: canvasIdx },
+      _enabled: true,
+      __prefab: null,
+      _cameraComponent: { __id__: camCompIdx },
+      _alignCanvasWithScreen: true,
+      _id: '',
+    };
+    scene.push(canvasComp);
+    byId.set(id, canvasComp);
+    canvasNode._components.push({ __id__: id });
+  } else {
+    canvasComp._cameraComponent = { __id__: camCompIdx };
+    canvasComp._alignCanvasWithScreen = true;
+  }
+
+  // UI 层：Canvas/GameLayer 子树用 UI_2D；Camera 节点本身保持 DEFAULT 亦可
+  const UI_2D = 33554432;
+  canvasNode._layer = UI_2D;
   const markUiLayer = (nodeIdx) => {
     const node = byId.get(nodeIdx);
     if (!node || node.__type__ !== 'cc.Node') return;
-    node._layer = 33554432;
+    if (!isCamName(node._name)) node._layer = UI_2D;
     for (const ch of node._children ?? []) markUiLayer(ch.__id__);
   };
   markUiLayer(canvasIdx);
 
   fs.writeFileSync(sceneAbs, `${JSON.stringify(scene, null, 2)}\n`, 'utf8');
-  return { ok: true, camCompId: camCompIdx };
+  return {
+    ok: true,
+    camCompId: camCompIdx,
+    camName: uiCamNode._name,
+    canvasName: canvasNode._name,
+    designWidth,
+    designHeight,
+  };
 }
 
 /**
@@ -462,14 +612,24 @@ export function buildBindingsFromManifest(manifest, pathMap, projectRoot) {
     }
     if (!sfUuid) continue;
 
+    // 延迟导入避免循环依赖
+    // path 候选在调用方用 lookup；这里内联剥前缀
+    const raw = entry.nodePath || '';
     const candidates = [
-      entry.nodePath?.replace(/^main › /, ''),
-      entry.nodePath,
+      raw,
+      raw.replace(/^main › /i, ''),
+      raw.replace(/^main › /i, '').replace(/^game_scene › /i, ''),
+      raw.replace(/^game_scene › /i, ''),
     ];
+    const m = candidates[2]?.match(/^[^›]+ › (.+)$/);
+    if (m) candidates.push(m[1]);
     let nodeUuid = null;
     for (const k of candidates) {
-      if (k && pathMap.has(k)) {
-        nodeUuid = pathMap.get(k);
+      const key = String(k || '')
+        .replace(/\s*›\s*/g, ' › ')
+        .trim();
+      if (key && pathMap.has(key)) {
+        nodeUuid = pathMap.get(key);
         break;
       }
     }

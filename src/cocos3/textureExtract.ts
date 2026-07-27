@@ -96,8 +96,13 @@ export function getAtlasCacheKey(
   texture: TextureRuntime,
   rect: AtlasFrameRect
 ): string {
-  const id = texture.uuid ?? texture._uuid ?? texture.getId?.() ?? 'tex';
-  return `${id}_${rect.x}_${rect.y}_${rect.w}_${rect.h}`;
+  // uuid 可能是空串，不能用 ??（空串会跳过 getId）
+  const id =
+    texture.uuid ||
+    texture._uuid ||
+    texture.getId?.() ||
+    `tex${texture.width ?? 0}x${texture.height ?? 0}`;
+  return `v2_${id}_${rect.x}_${rect.y}_${rect.w}_${rect.h}`;
 }
 
 export function resolveFrameRect(
@@ -497,6 +502,7 @@ async function readFullAndCrop(
     const buf = await texture.readPixels(0, 0, texW, texH);
     if (!buf) return null;
 
+    // Cocos Texture2D.readPixels 通常已是顶左；先顶左，近空再试底原点
     const top = cropFromFullBuffer(buf, texW, texH, rect, false);
     if (top && hasVisiblePixels(top)) return top;
 
@@ -609,7 +615,9 @@ export async function extractAtlasFramePixels(
     };
 
     logTextureExtract(logCtx, '尝试 webgl-fbo/device-copy', { method: 'webgl-fbo' });
-    const webgl = extractAtlasViaWebGL(texture, rect);
+    // 大图集跳过 GPU 整图回读，直接走后续 bake
+    const webgl =
+      texW * texH >= 1024 * 1024 ? null : extractAtlasViaWebGL(texture, rect);
     if (webgl) {
       const opaque = measureOpaqueBBox(webgl.imageData);
       traceStep(

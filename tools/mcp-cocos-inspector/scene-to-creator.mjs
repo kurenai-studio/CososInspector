@@ -28,7 +28,7 @@ const inspectorCall = (wsPort, method, argList, opts = {}) =>
       opts.timeoutMs ??
       (method === 'downloadTexture' ? 300_000 : undefined),
   });
-import { resolveSharePath } from './shared-fs.mjs';
+import { resolveSharePath, setShareContext, getShareDir } from './shared-fs.mjs';
 import {
   buildBindingsFromManifest,
   buildPathToNodeUuidMap,
@@ -42,6 +42,7 @@ import {
 import {
   collectUiSizeBindings,
   indexSnapshotNodes,
+  lookupPathMap,
   normalizeSpriteFrameMeta,
   parseSpriteSizeMode,
   parseUiFromSnapshotNode,
@@ -65,6 +66,8 @@ const parseArgs = () => {
     bridge: get('--bridge', process.env.COCOSMCP_BRIDGE ?? 'http://127.0.0.1:3921'),
     wsPort: Number(get('--ws-port', process.env.COCOS_BRIDGE_PORT ?? '17373')),
     pageUrlMatch: get('--page-url-match', process.env.COCOS_PAGE_URL_MATCH ?? 'godeebxp'),
+    domain: get('--domain', process.env.COCOS_INSPECTOR_DOMAIN ?? ''),
+    assetKey: get('--asset-key', ''),
     maxNodes: Number(get('--max-nodes', '2000')),
     maxSprites: Number(get('--max-sprites', '600')),
     clear: has('--clear'),
@@ -77,6 +80,33 @@ const parseArgs = () => {
     manifestPath: get('--manifest', ''),
     liveSpritesPath: get('--live-sprites', ''),
   };
+};
+
+/** 从 scene 路径推导资源目录名，如 bountyhunter_recovered.scene → bountyhunter */
+const deriveAssetKey = (sceneRel, explicit) => {
+  if (explicit) return explicit.replace(/[\\/]+/g, '').trim();
+  const base = path.basename(sceneRel || '', path.extname(sceneRel || ''));
+  const key = base.replace(/_recovered$/i, '').replace(/[^a-zA-Z0-9_-]+/g, '_');
+  return key || 'godeebxp';
+};
+
+/** 对齐 bridge-daemon 的域名隔离 share 目录 */
+const applyShareDirForDomain = (domain, wsPort) => {
+  if (!domain) return;
+  const repoRoot = path.resolve(path.join(__dirname, '../..'));
+  const shareDir = path.join(
+    repoRoot,
+    'tmp',
+    'mcp-share',
+    String(domain).replace(/\./g, '_')
+  );
+  setShareContext({
+    shareDir,
+    domain,
+    wsPort: Number(wsPort) || undefined,
+    httpPort: Number(wsPort) ? Number(wsPort) + 1 : undefined,
+  });
+  console.error(`[scene-to-creator] shareDir=${getShareDir()}`);
 };
 
 const normalizeProjectKey = (p) => path.resolve(p).replace(/\\/g, '/').toLowerCase();
@@ -130,14 +160,15 @@ const preflightSaveScene = async (bridge, sceneUrl) => {
 };
 
 /** 绑定 Sprite 前重置 .meta，避免「Rect exceeds maximum margin」 */
-const prepareTextureMetaForScene = async (project, manifest, bridge) => {
+const prepareTextureMetaForScene = async (project, manifest, bridge, assetKey) => {
   const entries = Object.values(manifest ?? {});
   if (!entries.length) return { patched: 0, skipped: 0 };
+  const key = assetKey || 'godeebxp';
 
   let metaReset = resetAllSpriteMetaFromManifest(project, manifest);
   // 绑定前刷新资源库，让 Creator 识别 PNG；再重置 meta 去掉 auto-trim
   const dbUrls = [
-    'db://assets/recovered/godeebxp/sprites',
+    `db://assets/recovered/${key}/sprites`,
     ...new Set(entries.map((e) => e.dbUrl).filter(Boolean)),
   ];
   await execEval(
@@ -171,21 +202,28 @@ const collectSpriteNodes = (node, out = []) => {
   return out;
 };
 
-/** 快照与试玩页 listSprites 路径对齐（去 main 前缀、统一 › 空格） */
+/** 快照与试玩页 listSprites 路径对齐（去 main 前缀、统一 › 空格，兼容乱码分隔符） */
 const normalizeSpritePath = (p) =>
   String(p ?? '')
-    .replace(/^main › /, '')
+    // UTF-8 › (U+203A) 被按 GBK/CP936 误读时常见为 鈥?
+    .replace(/\s*鈥\?\s*/g, ' › ')
+    .replace(/\s*鈥\uFFFD\s*/g, ' › ')
+    .replace(/\s*[›>／/]\s*/g, ' › ')
+    .replace(/^main › /i, '')
+    .replace(/^game_scene › /i, '')
     .replace(/\s*›\s*/g, ' › ')
     .trim();
 
 const buildLiveSpritePathMap = (liveSprites = []) => {
   const map = new Map();
   for (const sp of liveSprites) {
+    const norm = normalizeSpritePath(sp.path);
     const keys = [
-      normalizeSpritePath(sp.path),
-      sp.path?.replace(/^main › /, ''),
+      norm,
       sp.path,
-      sp.name,
+      // 同名节点极多（img_symbol / Background），禁止单独用 name 做键
+      norm && sp.frameName ? `${norm}@@${sp.frameName}` : null,
+      sp.name && sp.frameName ? `${sp.name}@@${sp.frameName}` : null,
     ].filter(Boolean);
     for (const key of keys) {
       if (!map.has(key)) map.set(key, sp);
@@ -200,7 +238,21 @@ const safeFileStem = (nodeId, name) => {
 };
 
 const extractDesignResolution = (snapshot) => {
-  const canvas = findInTree(snapshot.root, 'Canvas');
+  const findCanvasHost = (node) => {
+    if (!node) return null;
+    if (node.name === 'Canvas') return node;
+    const hasCanvas = (node.components || []).some((c) =>
+      /cc\.Canvas|^Canvas$/i.test(c.typeName || c.shortName || '')
+    );
+    if (hasCanvas) return node;
+    if (node.name === 'GameLayer' && node.uiTransform) return node;
+    for (const ch of node.children ?? []) {
+      const hit = findCanvasHost(ch);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const canvas = findCanvasHost(snapshot.root) || findInTree(snapshot.root, 'Canvas');
   let width = canvas?.uiTransform?.contentSize?.width;
   let height = canvas?.uiTransform?.contentSize?.height;
   if (!width || !height) {
@@ -278,7 +330,7 @@ const exportSpriteTextures = async (snapshot, args) => {
   const snapById = indexSnapshotNodes(snapshot.root);
   const assetsDir = path.join(
     args.project,
-    'assets/recovered/godeebxp/sprites'
+    `assets/recovered/${args.assetKey || 'godeebxp'}/sprites`
   );
   fs.mkdirSync(assetsDir, { recursive: true });
 
@@ -347,10 +399,19 @@ const writeDownloadedTexture = (dl, abs) => {
   for (let i = 0; i < limited.length; i += 1) {
     const sp = limited[i];
     if (!args.forceTextures && manifest[sp.id]?.rel) continue;
+    const snapNode = snapById[sp.id];
+    const snapFrame =
+      snapNode?.spriteFrame?.frameName ||
+      snapNode?.components?.find((c) => c.flags?.isSprite)?.rows?.find(
+        (r) => r.label === '贴图'
+      )?.value ||
+      '';
+    const pathKey = normalizeSpritePath(sp.path);
     const liveSp =
-      liveByPath.get(normalizeSpritePath(sp.path)) ??
+      liveByPath.get(pathKey) ??
       liveByPath.get(sp.path) ??
-      liveByPath.get(sp.name);
+      (snapFrame ? liveByPath.get(`${pathKey}@@${snapFrame}`) : null) ??
+      (snapFrame ? liveByPath.get(`${sp.name}@@${snapFrame}`) : null);
     if (!liveSp?.id) {
       fail += 1;
       console.error(
@@ -389,7 +450,7 @@ const writeDownloadedTexture = (dl, abs) => {
       let entry = frameCache.get(frameKey);
       if (!entry) {
         const stem = safeFileStem(sp.id, dl.detail?.frameName || sp.name);
-        const rel = `assets/recovered/godeebxp/sprites/${stem}.png`;
+        const rel = `assets/recovered/${args.assetKey || 'godeebxp'}/sprites/${stem}.png`;
         entry = {
           rel,
           dbUrl: `db://${rel.replace(/\\/g, '/')}`,
@@ -444,10 +505,11 @@ const loadManifest = (manifestPath) => {
   return { manifest: raw.manifest ?? {}, stats: raw.stats ?? {} };
 };
 
-const buildCreatorScript = (snapshot, sceneUrl, design, manifest, maxNodes) => {
+const buildCreatorScript = (snapshot, sceneUrl, design, manifest, maxNodes, assetKey) => {
   const rootPayload = JSON.stringify(snapshot.root);
   const manifestPayload = JSON.stringify(manifest);
   const designPayload = JSON.stringify(design);
+  const spritesDb = `db://assets/recovered/${assetKey || 'godeebxp'}/sprites`;
 
   return `
 const sceneUrl = ${JSON.stringify(sceneUrl)};
@@ -458,7 +520,7 @@ const textureManifest = ${manifestPayload};
 const design = ${designPayload};
 
 await Editor.Message.request('asset-db', 'refresh-asset', sceneUrl);
-await Editor.Message.request('asset-db', 'refresh-asset', 'db://assets/recovered/godeebxp/sprites');
+await Editor.Message.request('asset-db', 'refresh-asset', ${JSON.stringify(spritesDb)});
 let sceneInfo = await Editor.Message.request('asset-db', 'query-asset-info', sceneUrl);
 if (!sceneInfo?.uuid) {
   sceneInfo = await Editor.Message.request('asset-db', 'query-asset-info', sceneRel);
@@ -730,12 +792,38 @@ async function walk(src, parentUuid, depth) {
       } catch (_) {}
     }
 
-    const isCanvas = ch.name === 'Canvas' && depth === 0;
+    const hasCanvasComp = (ch.components || []).some((c) =>
+      /cc\.Canvas|^Canvas$/i.test(c.typeName || c.shortName || '')
+    );
+    const isCanvas =
+      depth === 0 && (ch.name === 'Canvas' || ch.name === 'GameLayer' || hasCanvasComp);
+    const isCamera =
+      /^(UI)?Camera$/i.test(ch.name || '') ||
+      (ch.components || []).some((c) => /cc\.Camera/.test(c.typeName || ''));
     const hasUi = !!ch.uiTransform || (ch.components || []).some((c) => /UITransform|Widget|Canvas/.test(c.typeName || ''));
     const hasSprite = (ch.components || []).some((c) => c.flags?.isSprite);
     const uiParsed = parseUiFromNode(ch);
 
-    if (isCanvas) {
+    if (isCamera) {
+      await ensureComponent(nodeUuid, 'cc.Camera');
+      try {
+        await Editor.Message.request('scene', 'set-property', {
+          uuid: nodeUuid,
+          path: 'cc.Camera.projection',
+          dump: { value: 0 },
+        });
+        await Editor.Message.request('scene', 'set-property', {
+          uuid: nodeUuid,
+          path: 'cc.Camera.orthoHeight',
+          dump: { value: design.height / 2 },
+        });
+        await Editor.Message.request('scene', 'set-property', {
+          uuid: nodeUuid,
+          path: 'cc.Camera.priority',
+          dump: { value: 0 },
+        });
+      } catch (_) {}
+    } else if (isCanvas) {
       await applyCanvasDesign(nodeUuid, ch);
       recordUiBinding(uiSizeBindings, nodeUuid, parseUiFromNode(ch) || {
         contentSize: { width: design.width, height: design.height },
@@ -810,15 +898,12 @@ const collectMaskTargets = (snapshotRoot, pathMap) => {
     if (maskComp) {
       const typeRow = maskComp.rows?.find((r) => r.label === '类型');
       const maskType = parseInt(String(typeRow?.value ?? '0'), 10);
-      const paths = [n.path?.replace(/^main › /, ''), n.path].filter(Boolean);
-      for (const p of paths) {
-        if (pathMap.has(p)) {
-          targets.push({
-            nodeUuid: pathMap.get(p),
-            maskType: Number.isFinite(maskType) ? maskType : 0,
-          });
-          break;
-        }
+      const nodeUuid = lookupPathMap(pathMap, n.path);
+      if (nodeUuid) {
+        targets.push({
+          nodeUuid,
+          maskType: Number.isFinite(maskType) ? maskType : 0,
+        });
       }
     }
     for (const ch of n.children || []) walk(ch);
@@ -851,8 +936,10 @@ const main = async () => {
 
   const bridgeInfo = resolveCreatorBridge(args.project, args.bridge);
   args.bridge = bridgeInfo.url;
+  args.assetKey = deriveAssetKey(args.sceneRel, args.assetKey);
+  applyShareDirForDomain(args.domain, args.wsPort);
   console.error(
-    `[scene-to-creator] Creator 桥接 ${args.bridge} 工程 ${bridgeInfo.projectPath ?? args.project}`
+    `[scene-to-creator] Creator 桥接 ${args.bridge} 工程 ${bridgeInfo.projectPath ?? args.project} assetKey=${args.assetKey}`
   );
 
   await connectBridgeClientOnly(args.wsPort);
@@ -860,7 +947,7 @@ const main = async () => {
 
   if (args.refreshSnapshot || (args.withTextures && !args.skipTextures)) {
     console.error(
-      '[scene-to-creator] 等待试玩页扩展连接桥接（请在 godeebxp 页 F5 刷新）…'
+      `[scene-to-creator] 等待试玩页扩展连接桥接（请在 ${args.pageUrlMatch || '试玩'} 页 F5 刷新）…`
     );
     const st = await waitForExtension(120_000, args.wsPort);
     console.error(
@@ -885,7 +972,7 @@ const main = async () => {
   let textureResult = { manifest: {}, stats: { total: 0, ok: 0, fail: 0, uniqueFiles: 0 } };
   const manifestPath = args.manifestPath
     ? path.resolve(args.manifestPath)
-    : path.resolve(path.dirname(snapAbs), 'godeebxp-texture-manifest.json');
+    : path.resolve(path.dirname(snapAbs), `${args.assetKey}-texture-manifest.json`);
 
   if (args.withTextures && !args.skipTextures) {
     console.error('[scene-to-creator] 导出 Sprite 纹理到工程目录（文件通道）…');
@@ -925,7 +1012,8 @@ const main = async () => {
     sceneUrl,
     design,
     textureResult.manifest,
-    args.maxNodes
+    args.maxNodes,
+    args.assetKey
   );
 
   console.error('[scene-to-creator] Creator 重建节点树…');
@@ -934,7 +1022,8 @@ const main = async () => {
     const preMeta = await prepareTextureMetaForScene(
       args.project,
       textureResult.manifest,
-      args.bridge
+      args.bridge,
+      args.assetKey
     );
     console.error('[scene-to-creator] 纹理 .meta 预重置（绑定前）', preMeta);
   }
@@ -959,7 +1048,11 @@ const main = async () => {
     const uiPatch = patchUiSizesOnDisk(disk.abs, uiBindings);
     const maskTargets = collectMaskTargets(snapshot.root, pathMap);
     const maskPatch = patchMasksOnDisk(disk.abs, maskTargets);
-    const camPatch = patchCanvasCameraOnDisk(disk.abs, design.height);
+    const camPatch = patchCanvasCameraOnDisk(
+      disk.abs,
+      design.height,
+      design.width
+    );
     const metaReset = resetAllSpriteMetaFromManifest(args.project, textureResult.manifest);
     // 勿 refresh-asset：会触发 Creator 对 PNG 重新 auto-trim，破坏 originalCanvas 全图 meta
     console.error('[scene-to-creator] 纹理 .meta 最终重置', metaReset);

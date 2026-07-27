@@ -78,11 +78,15 @@ export async function bakeSpriteFrameViaEngine(
     if (!parent?.addChild) return null;
     parent.addChild(root);
 
-    await forceEngineRender(director, game, 8);
+    await forceEngineRender(director, game, 3);
 
     let buf: ArrayBufferView | null = null;
     if (typeof rt.readPixels === 'function') {
-      buf = await rt.readPixels(0, 0, w, h);
+      const readPromise = Promise.resolve(rt.readPixels(0, 0, w, h));
+      const timeout = new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), 5000);
+      });
+      buf = (await Promise.race([readPromise, timeout])) as ArrayBufferView | null;
     }
     if (!buf && typeof (rt as { readPixelsSync?: () => unknown }).readPixelsSync === 'function') {
       buf = (rt as { readPixelsSync: () => ArrayBufferView }).readPixelsSync();
@@ -107,7 +111,8 @@ async function forceEngineRender(
   frames: number
 ): Promise<void> {
   for (let i = 0; i < frames; i++) {
-    await new Promise<void>((r) => requestAnimationFrame(() => r()));
+    // 不用 rAF：后台标签会被 Chrome 严重节流，导致 bake 卡数十分钟
+    await new Promise<void>((r) => setTimeout(r, 0));
     try {
       game?.step?.();
       director.tick?.(0);

@@ -35,7 +35,9 @@
 
 **难点**：ASTC 等压缩纹理 `readPixels` 常失败；`rect` / `rotated` / WebGL Y 轴易裁错。
 
-**实现**：`src/cocos3/textureExtract.ts` · `textureBake.ts` · `textureWebGL.ts`
+**实现**：`src/cocos3/textureExtract.ts` · `textureBake.ts` · `textureWebGL.ts` · `textureExtractEngine.ts`
+
+**Y 原点**：`webgl-fbo` 先垂直翻转再顶左裁切；缓冲/device 顶左优先、近空再试底原点。`isRotated` 走 pack 矩形 + unrotate。
 
 ---
 

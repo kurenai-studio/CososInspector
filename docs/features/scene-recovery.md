@@ -69,7 +69,14 @@ MCP 调用示例：
 
 - **下载/导出默认走 engine 对齐路径**（`exportSpritePngBase64({ path: 'auto' })`：有 `enginePixels` 用 engine，否则回退 legacy）。engine 输出已是 originalSize 全图，**不再二次拉伸**。
 - `downloadTexture(nodeId, { path })` 可显式指定 `'engine' | 'legacy' | 'auto'`；返回 `detail.usedPath` 标注实际路径，`detail.extractMethod` 反映该路径方法（engine 时为 `engine-trim` 等）。
+- **图集 Y 原点**：WebGL `readPixels` 为底原点，导出前先翻成顶左再按 `frame.rect` 裁切；device/缓冲路径顶左优先，近空再试底原点（两侧是不同图集区域，不能用覆盖率互比）。
+- **`isRotated`**：以 **UV 实际占位** 判定是否真旋转（勿盲信 flag）。UV≈逻辑
+  `fw×fh`→直裁；UV≈交换 `fh×fw`→pack 裁切后 `unrotateCw`。RSG 常把未旋转竖长帧
+  （如 `base_bg_front_v`）误标 `isRotated`，盲信会把正向图解成侧躺。真旋转但 packed
+  越界时仍退回直裁。unrotate 固定 `cw`（coverage 平局旧默认 ccw 会导致文字倒立）。
+- **压缩图集**：整图 `readPixels` 失败时，engine 路径对大图集优先 **device 区域拷贝**（`BufferTextureCopy` 只拷 `frame.rect`），再失败才 bake；`downloadTexture` 每次清像素缓存。
 - MCP 批量走 **share 文件通道**；`scene-to-creator.mjs --with-textures` 默认吃到 engine originalSize PNG，正好契合 `resetSpriteMetaTrimOnDisk` 的全图 meta。
+- **live-sprites 路径**：`listSprites` 缓存若把 `›` 存成乱码 `鈥?`，path 对不上会回退到同名节点，导致全部 `img_symbol` 绑成同一帧。`normalizeSpritePath` 会兼容乱码；**禁止**只用 `name` 做映射键。同名兄弟（多个 `symbol_12`）仅靠 path 会碰撞，绑定需带 y/序号。
 
 **资源导出按钮（Inspector）**：选中节点后，组件头部按类型显示导出按钮：
 
@@ -83,6 +90,12 @@ MCP 调用示例：
 **零尺寸**：`0×56`、`0×0` 等合法尺寸必须写入磁盘（勿用 `if (width && height)` 跳过）。
 
 **补丁后查看**：关闭场景选「不保存」→ 重新打开；若在 Creator 里保存会覆盖磁盘补丁。
+
+**设计分辨率**：RSG 竖屏机台快照多为 `720×1280`。若工程仍是默认 `1280×720`，`Canvas.alignCanvasWithScreen` 会把 `GameLayer` 拉到 `(640,360)`，场景里看起来像「整屏躺倒/对不齐白框」。复刻后应设 `general.designResolution = { width:720, height:1280, fitWidth:false, fitHeight:true }`，并把 `GameLayer` 置于 `(360,640)`、UITransform `720×1280`。
+
+**路径对齐**：快照 path 常带 `game_scene ›` 前缀，Creator 重建后从 `GameLayer` 起算。`scenePathCandidates` / `lookupPathMap` 会剥 `main`/`game_scene` 前缀再匹配；否则 UITransform/Mask 补丁会全部 miss（表现成全是 100×100）。
+
+**Camera / Canvas**：RSG 试玩常见 `GameLayer`（挂 `cc.Canvas`）+ 子节点 `Camera`（非 `UICamera`/`Canvas` 命名）。`patchCanvasCameraOnDisk` 会识别 `Camera|UICamera` 与 `Canvas|GameLayer`，补 `cc.Camera`/`cc.Canvas`/`cc.UITransform` 并关联。补丁后仍须「关闭不保存 → 重开」。
 
 一键修复当前场景：
 
@@ -118,6 +131,8 @@ npm run cocos-scene-to-creator -- tmp/godeebxp-scene-snapshot.json `
 | `--with-textures` | 批量 `downloadTexture(originalCanvas)` → 写入 `assets/recovered/godeebxp/sprites/` |
 | `--refresh-snapshot` | 先从试玩页重新导出快照 |
 | `--page-url-match` | 精确匹配 tab URL 片段 |
+| `--domain` | 试玩域名；对齐 `tmp/mcp-share/<domain_>/` 共享目录（多实例必填） |
+| `--asset-key` | 纹理落盘目录名，默认从 scene 名推导（如 `bountyhunter_recovered` → `bountyhunter`） |
 | `--live-sprites` | 预缓存的 `listSprites` JSON；快照 nodeId 与试玩页不一致时按 **path** 匹配 live id 再 `downloadTexture` |
 
 ### Inspector MCP 纹理能力

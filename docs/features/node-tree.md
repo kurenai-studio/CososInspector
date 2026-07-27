@@ -78,7 +78,16 @@
 - 自定义组件旁 **「还原 TS」**：从运行时导出 `.recovered.ts` 草稿（见 `docs/features/script-recover.md`）
 - **sp.Skeleton** 旁 **「导出 Spine」**：从内存导出 json/atlas/纹理 zip，多页 atlas 纹理名与 `.atlas` 页一致（见 `docs/features/spine-export.md`）
 
-### 10. 资源加载状态浮窗
+### 10. 游戏暂停（看属性）
+
+工具栏 **「暂停」/「继续」**：调用 `cc.director.pause()` / `resume()`，停住后可继续点节点看 Inspector（位置等）。
+
+- 状态栏会追加 `· 已暂停`
+- MCP：`cocos_pause_game` / `cocos_resume_game` / `cocos_toggle_pause`（可选 `mode`: `director` | `game` | `both`）
+- `cocos_page_info` 返回 `paused` / `pause` 字段
+- **限制**：部分 Slots 自管 setTimeout/ticker，可能不完全跟随 director；可试 `mode: both`
+
+### 11. 资源加载状态浮窗
 
 独立浮窗展示 `cc.assetManager` 资源与 Bundle 状态（与主面板分离，可拖拽）。
 

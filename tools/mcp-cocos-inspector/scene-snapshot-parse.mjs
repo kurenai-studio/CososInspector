@@ -2,6 +2,35 @@
  * 从快照节点解析 UITransform 尺寸（允许 0 宽/高，如 0×56、0×0）
  */
 
+/** 快照 path ↔ Creator 场景 path 候选（去 main/game_scene 等根前缀） */
+export const scenePathCandidates = (p) => {
+  if (!p) return [];
+  const out = new Set();
+  const add = (s) => {
+    const t = String(s ?? '')
+      .replace(/\s*›\s*/g, ' › ')
+      .trim();
+    if (t) out.add(t);
+  };
+  add(p);
+  let s = String(p).replace(/^main › /i, '');
+  add(s);
+  s = s.replace(/^game_scene › /i, '');
+  add(s);
+  // 再剥一层场景根（Creator 重建后根常是 GameLayer，不再含 game_scene）
+  const m = s.match(/^[^›]+ › (.+)$/);
+  if (m) add(m[1]);
+  return [...out];
+};
+
+export const lookupPathMap = (pathMap, p) => {
+  if (!pathMap) return null;
+  for (const k of scenePathCandidates(p)) {
+    if (pathMap.has(k)) return pathMap.get(k);
+  }
+  return null;
+};
+
 export const parseSizePair = (value) => {
   const m = String(value ?? '').match(/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/);
   if (!m) return null;
@@ -95,21 +124,15 @@ export const indexSnapshotNodes = (root) => {
 export const collectUiSizeBindings = (snapshotRoot, pathMap) => {
   const bindings = [];
   const walk = (node) => {
-    const relPath = node.path?.replace(/^main › /, '') ?? node.path;
-    const keys = [relPath, node.path].filter(Boolean);
-    let nodeUuid = null;
-    for (const k of keys) {
-      if (pathMap.has(k)) {
-        nodeUuid = pathMap.get(k);
-        break;
-      }
-    }
+    const nodeUuid = lookupPathMap(pathMap, node.path);
     const ui = parseUiFromSnapshotNode(node);
     if (nodeUuid && ui?.contentSize && isValidUiSize(ui.contentSize.width, ui.contentSize.height)) {
       bindings.push({
         nodeUuid,
         width: ui.contentSize.width,
         height: ui.contentSize.height,
+        anchorX: ui.anchorPoint?.x,
+        anchorY: ui.anchorPoint?.y,
       });
     }
     for (const ch of node.children || []) walk(ch);

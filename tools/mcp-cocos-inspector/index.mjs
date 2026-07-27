@@ -155,12 +155,61 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'cocos_page_info',
-      description: '当前试玩页：URL、引擎版本、场景名',
+      description: '当前试玩页：URL、引擎版本、场景名、是否暂停',
       inputSchema: {
         type: 'object',
         properties: {
           pageUrlMatch: { type: 'string' },
           domain: { type: 'string', description: '试玩页域名，如 play.godeebxp.com' },
+          wsPort: { type: 'number' },
+          cdpPort: { type: 'number' },
+        },
+      },
+    },
+    {
+      name: 'cocos_pause_game',
+      description:
+        '暂停试玩页游戏（默认 cc.director.pause），便于停住后查看节点属性',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          mode: {
+            type: 'string',
+            enum: ['director', 'game', 'both'],
+            description: '默认 director；部分游戏自管 ticker 可试 both',
+          },
+          pageUrlMatch: { type: 'string' },
+          domain: { type: 'string' },
+          wsPort: { type: 'number' },
+          cdpPort: { type: 'number' },
+        },
+      },
+    },
+    {
+      name: 'cocos_resume_game',
+      description: '恢复试玩页游戏（director.resume / game.resume）',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          pageUrlMatch: { type: 'string' },
+          domain: { type: 'string' },
+          wsPort: { type: 'number' },
+          cdpPort: { type: 'number' },
+        },
+      },
+    },
+    {
+      name: 'cocos_toggle_pause',
+      description: '切换试玩页暂停/继续',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          mode: {
+            type: 'string',
+            enum: ['director', 'game', 'both'],
+          },
+          pageUrlMatch: { type: 'string' },
+          domain: { type: 'string' },
           wsPort: { type: 'number' },
           cdpPort: { type: 'number' },
         },
@@ -509,6 +558,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             ),
           },
         ],
+      };
+    }
+
+    if (name === 'cocos_pause_game') {
+      const res = await apiCall(
+        'pauseGame',
+        [args.mode ?? 'director'],
+        opts
+      );
+      return {
+        content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+        isError: !res?.ok,
+      };
+    }
+
+    if (name === 'cocos_resume_game') {
+      const res = await apiCall('resumeGame', [], opts);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+        isError: !res?.ok,
+      };
+    }
+
+    if (name === 'cocos_toggle_pause') {
+      const res = await apiCall(
+        'togglePause',
+        args.mode ? [args.mode] : [],
+        opts
+      );
+      return {
+        content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+        isError: !res?.ok,
       };
     }
 

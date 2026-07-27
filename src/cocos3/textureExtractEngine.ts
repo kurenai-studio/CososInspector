@@ -6,6 +6,7 @@
 import { logTextureExtract } from './textureExtractLog';
 import type { SpriteFrameRuntime, TextureExtractResult } from './textureExtract';
 import { resolveDisplaySize, resolveFrameRect } from './textureExtract';
+import { bakeSpriteFrameViaEngine } from './textureBake';
 import type { ExtractPathTrace } from './textureExtractTrace';
 import {
   createPathTrace,
@@ -94,13 +95,12 @@ const resolveRotatedWithTrace = (
   const ccw = unrotateCcw(packed, fw, fh);
   const cwCoverage = opaqueCoverage(cw);
   const ccwCoverage = opaqueCoverage(ccw);
-  // Cocos 图集 isRotated：打包时顺时针 90°，还原应 ccw；coverage 平局时无法区分方向
-  const picked =
-    cwCoverage > ccwCoverage + 0.02
-      ? 'cw'
-      : 'ccw';
+  // TexturePacker/Cocos isRotated：图集内顺时针 90° 存放。
+  // unrotateCw() 与常见 TP 还原一致；coverage 对文字帧几乎相同，旧逻辑平局默认
+  // ccw 会导致整帧倒立（jpbar_major 已实证）。固定走 cw，不再用 coverage 选型。
+  const picked: 'cw' | 'ccw' = 'cw';
   return {
-    image: picked === 'ccw' ? ccw : cw,
+    image: cw,
     picked,
     cwCoverage,
     ccwCoverage,
@@ -151,7 +151,7 @@ export const extractEngineAlignedFramePixels = async (
   const logCtx = resolveLogCtx(nodeId, frame);
   const calcMeta = snapshotFrameCalc(frame, texW, texH);
   const trace = traceOut ?? createPathTrace('engine', calcMeta);
-  const isRotated = calcMeta.isRotated;
+  const isRotatedFlag = calcMeta.isRotated;
   const offset = readOffset(frame);
   const fw = rect.w;
   const fh = rect.h;
@@ -160,9 +160,42 @@ export const extractEngineAlignedFramePixels = async (
   const trimX = Math.round((ow - fw) / 2 + offset.x);
   const trimY = Math.round((oh - fh) / 2 - offset.y);
   const atlasRect = { x: rect.x, y: rect.y, w: fw, h: fh };
-  const packedRect = isRotated
+  // 以 UV 实际占位为准：RSG 常把未旋转竖长帧误标 isRotated（bg_front UV=864×1800
+  // 却 flag=true）。UV≈逻辑尺寸→直裁；UV≈交换尺寸→真旋转再 unrotate。
+  const approxEq = (a: number, b: number, tol = 2.5) => Math.abs(a - b) <= tol;
+  let uvAtlas: { w: number; h: number } | null = null;
+  let actualRotated = isRotatedFlag;
+  const uv = calcMeta.uv;
+  if (uv && uv.length >= 8 && texW > 0 && texH > 0) {
+    let minU = 1;
+    let minV = 1;
+    let maxU = 0;
+    let maxV = 0;
+    for (let i = 0; i + 1 < uv.length; i += 2) {
+      minU = Math.min(minU, uv[i]);
+      minV = Math.min(minV, uv[i + 1]);
+      maxU = Math.max(maxU, uv[i]);
+      maxV = Math.max(maxV, uv[i + 1]);
+    }
+    const uvW = (maxU - minU) * texW;
+    const uvH = (maxV - minV) * texH;
+    uvAtlas = { w: uvW, h: uvH };
+    const matchLogical = approxEq(uvW, fw) && approxEq(uvH, fh);
+    const matchPacked = approxEq(uvW, fh) && approxEq(uvH, fw);
+    if (matchPacked && !matchLogical) actualRotated = true;
+    else if (matchLogical && !matchPacked) actualRotated = false;
+  }
+  const packedRect = actualRotated
     ? { x: rect.x, y: rect.y, w: fh, h: fw }
     : atlasRect;
+  // 真旋转但 packed 越界时退回直裁（如误标竖长帧放不进窄图集）
+  const packedFits =
+    packedRect.x >= 0 &&
+    packedRect.y >= 0 &&
+    packedRect.x + packedRect.w <= texW + 0.5 &&
+    packedRect.y + packedRect.h <= texH + 0.5;
+  const effectiveRotated = !!(actualRotated && packedFits);
+  const cropTarget = effectiveRotated ? packedRect : atlasRect;
 
   traceStep(logCtx, trace, 'meta', {
     ...calcMeta,
@@ -176,79 +209,101 @@ export const extractEngineAlignedFramePixels = async (
     },
     atlasRect,
     packedRect,
+    effectiveRotated,
+    packedFits,
+    actualRotated,
+    isRotatedFlag,
+    uvAtlas,
   });
 
   logTextureExtract(logCtx, '引擎对齐：开始', {
     method: 'engine-trim',
     frameRect: rect,
     pixelSize: { w: ow, h: oh },
-    detail: { isRotated, fw, fh, trimX, trimY, offset, packedRect },
+    detail: {
+      isRotated: isRotatedFlag,
+      actualRotated,
+      effectiveRotated,
+      packedFits,
+      uvAtlas,
+      fw,
+      fh,
+      trimX,
+      trimY,
+      offset,
+      packedRect,
+      cropTarget,
+    },
   });
 
   try {
-    const atlas = readFullAtlasImageData(texture, texW, texH);
-    if (!atlas) {
+    // 大图集：优先 rect 区域 GPU 拷贝（已验证可还原压缩图集符号），失败再 bake
+    const largeAtlas = texW * texH >= 1024 * 1024;
+    let framePixels: ImageData | null = null;
+    let cropMode: 'atlas-direct' | 'packed-unrotate' | 'engine-bake' =
+      'atlas-direct';
+
+    framePixels =
+      extractAtlasViaWebGL(texture, cropTarget)?.imageData ?? null;
+
+    if (!framePixels && !largeAtlas) {
+      const atlas = readFullAtlasImageData(texture, texW, texH);
+      if (atlas) {
+        traceStep(logCtx, trace, 'read-atlas', { texW, texH }, {
+          pixelSize: { w: atlas.width, h: atlas.height },
+        });
+        framePixels = cropAtlasRegion(atlas.data, texW, texH, cropTarget);
+      }
+    }
+
+    if (!framePixels) {
+      const baked = await bakeSpriteFrameViaEngine(frame, { w: ow, h: oh });
+      if (baked && baked.width > 0 && baked.height > 0) {
+        cropMode = 'engine-bake';
+        traceStep(
+          logCtx,
+          trace,
+          'bake-fallback',
+          { ow, oh },
+          {
+            pixelSize: { w: baked.width, h: baked.height },
+            opaque: measureOpaqueBBox(baked),
+          }
+        );
+        traceFinish(logCtx, trace, 'engine-bake', baked);
+        logTextureExtract(logCtx, '引擎对齐：bake 兜底成功', {
+          method: 'engine-bake',
+          pixelSize: { w: baked.width, h: baked.height },
+        });
+        return { imageData: baked, method: 'engine-bake' };
+      }
       traceFinish(logCtx, trace, 'failed-read-atlas', null);
-      logTextureExtract(logCtx, '引擎对齐：读图集失败', {
+      logTextureExtract(logCtx, '引擎对齐：区域拷贝与 bake 均失败', {
         level: 'error',
         method: 'engine-trim',
       });
       return null;
     }
 
-    traceStep(logCtx, trace, 'read-atlas', { texW, texH }, {
-      pixelSize: { w: atlas.width, h: atlas.height },
-    });
-
-    // 与 legacy webgl-fbo 同裁切：atlasRect 直裁；GPU 图集上 isRotated 仅影响 UV，不必 unrotate
-    let framePixels =
-      extractAtlasViaWebGL(texture, atlasRect)?.imageData ??
-      cropAtlasRegion(atlas.data, texW, texH, atlasRect);
-    let cropMode: 'atlas-direct' | 'packed-unrotate' = 'atlas-direct';
-
-    if (framePixels) {
-      traceStep(
-        logCtx,
-        trace,
-        'crop-atlas',
-        { atlasRect, isRotated },
-        {
-          pixelSize: { w: framePixels.width, h: framePixels.height },
-          opaque: measureOpaqueBBox(framePixels),
-          note: '与 legacy 同 rect 直裁，跳过 unrotate',
-        }
-      );
-    } else if (isRotated) {
+    if (effectiveRotated) {
       cropMode = 'packed-unrotate';
-      let packed = cropAtlasRegion(atlas.data, texW, texH, packedRect);
-      if (!packed) {
-        traceFinish(logCtx, trace, 'failed-crop', null);
-        logTextureExtract(logCtx, '引擎对齐：pack 裁切失败', {
-          level: 'error',
-          method: 'engine-trim',
-          detail: { packedRect, atlasRect },
-        });
-        return null;
-      }
-
       traceStep(
         logCtx,
         trace,
         'crop-packed',
-        { packedRect },
+        { packedRect: cropTarget },
         {
-          pixelSize: { w: packed.width, h: packed.height },
-          opaque: measureOpaqueBBox(packed),
+          pixelSize: { w: framePixels.width, h: framePixels.height },
+          opaque: measureOpaqueBBox(framePixels),
         }
       );
-
-      const unr = resolveRotatedWithTrace(packed, fw, fh);
+      const unr = resolveRotatedWithTrace(framePixels, fw, fh);
       framePixels = unr.image;
       traceStep(
         logCtx,
         trace,
         'unrotate',
-        { fw, fh, packedSize: { w: packed.width, h: packed.height } },
+        { fw, fh, packedSize: { w: cropTarget.w, h: cropTarget.h } },
         {
           picked: unr.picked,
           cwCoverage: unr.cwCoverage,
@@ -258,13 +313,16 @@ export const extractEngineAlignedFramePixels = async (
         }
       );
     } else {
-      traceFinish(logCtx, trace, 'failed-crop', null);
-      logTextureExtract(logCtx, '引擎对齐：atlas 裁切失败', {
-        level: 'error',
-        method: 'engine-trim',
-        detail: { atlasRect },
-      });
-      return null;
+      traceStep(
+        logCtx,
+        trace,
+        'crop-atlas',
+        { atlasRect, isRotatedFlag, actualRotated },
+        {
+          pixelSize: { w: framePixels.width, h: framePixels.height },
+          opaque: measureOpaqueBBox(framePixels),
+        }
+      );
     }
 
     const canvas = compositeOnOriginal(framePixels, ow, oh, trimX, trimY);
@@ -286,7 +344,9 @@ export const extractEngineAlignedFramePixels = async (
       detail: {
         framePixels: { w: framePixels.width, h: framePixels.height },
         cropMode,
-        isRotated,
+        isRotated: isRotatedFlag,
+        actualRotated,
+        effectiveRotated,
       },
     });
 

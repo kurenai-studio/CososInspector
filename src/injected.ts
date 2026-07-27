@@ -30,6 +30,10 @@ import {
   enrichSpriteInspectData,
 } from './cocos3/spriteInspector';
 import {
+  getPauseState,
+  togglePause,
+} from './cocos3/gamePause';
+import {
   buildTreeInfo,
   findNodeById,
   getNodeId,
@@ -60,6 +64,7 @@ class CocosInspector3 {
   private scanModeSelect: HTMLSelectElement | null = null;
   private clearScanBtn: HTMLButtonElement | null = null;
   private assetBtn: HTMLButtonElement | null = null;
+  private pauseBtn: HTMLButtonElement | null = null;
 
   private expandedScene = new Set<string>();
   private selectedId: string | null = null;
@@ -163,6 +168,15 @@ class CocosInspector3 {
     refreshBtn.textContent = '刷新';
     refreshBtn.addEventListener('click', () => this.refreshAll(true));
     controls.appendChild(refreshBtn);
+
+    this.pauseBtn = document.createElement('button');
+    this.pauseBtn.type = 'button';
+    this.pauseBtn.className = 'pause-btn';
+    this.pauseBtn.textContent = '暂停';
+    this.pauseBtn.title =
+      '暂停/恢复游戏（director.pause），便于停住后查看节点属性';
+    this.pauseBtn.addEventListener('click', () => this.toggleGamePause());
+    controls.appendChild(this.pauseBtn);
 
     this.scanModeSelect = document.createElement('select');
     this.scanModeSelect.className = 'perf-scan-mode';
@@ -611,9 +625,12 @@ class CocosInspector3 {
     }
 
     this.refreshInspector(force || treeChanged);
+    this.syncPauseButton();
 
     const nodeCount = countNodes(treeInfo);
     if (this.scanRunning) return;
+
+    const pauseTag = getPauseState().paused ? ' · 已暂停' : '';
 
     if (this.perfReport) {
       const top = this.perfReport.suspects[0];
@@ -626,12 +643,35 @@ class CocosInspector3 {
           ? `基准 ${Math.round(this.perfReport.baselineDc)} DC`
           : '估算模式';
       this.setStatus(
-        `场景树 · ${nodeCount} 节点 · ${baseline}${topText}`
+        `场景树 · ${nodeCount} 节点 · ${baseline}${topText}${pauseTag}`
       );
       return;
     }
 
-    this.setStatus(`场景树 · ${nodeCount} 个节点 · ${scene.name || 'Scene'}`);
+    this.setStatus(
+      `场景树 · ${nodeCount} 个节点 · ${scene.name || 'Scene'}${pauseTag}`
+    );
+  }
+
+  private toggleGamePause(): void {
+    const result = togglePause('director');
+    if (!result.ok) {
+      console.error(`[暂停游戏] 切换失败: ${result.error}`);
+      this.setStatus(`暂停失败: ${result.error}`);
+      return;
+    }
+    this.syncPauseButton();
+    this.refreshAll(true);
+  }
+
+  private syncPauseButton(): void {
+    if (!this.pauseBtn) return;
+    const paused = getPauseState().paused;
+    this.pauseBtn.textContent = paused ? '继续' : '暂停';
+    this.pauseBtn.classList.toggle('pause-btn--active', paused);
+    this.pauseBtn.title = paused
+      ? '恢复游戏（director.resume）'
+      : '暂停游戏（director.pause），便于停住后查看节点属性';
   }
 
   private refreshInspector(force: boolean): void {

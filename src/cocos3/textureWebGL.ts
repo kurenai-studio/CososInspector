@@ -84,6 +84,46 @@ function cropAtlasFromFullRgba(
   return new ImageData(out, rect.w, rect.h);
 }
 
+/** 不透明像素占比（用于 Y 原点 / 双裁择优） */
+function opaqueCoverage(img: ImageData | null): number {
+  if (!img) return 0;
+  const d = img.data;
+  let opaque = 0;
+  for (let i = 3; i < d.length; i += 4) {
+    if (d[i]! > 8) opaque += 1;
+  }
+  return opaque / (img.width * img.height);
+}
+
+/**
+ * 顶左优先；仅当顶左裁切近空时再试底原点。
+ * 注意：两侧裁的是图集不同区域，不能用覆盖率互比（否则会误选密实 UI 碎片）。
+ */
+function pickCropByYOrigin(
+  pixels: Uint8Array,
+  texW: number,
+  texH: number,
+  rect: AtlasFrameRect
+): ImageData | null {
+  const top = cropAtlasFromFullRgba(pixels, texW, texH, rect, false);
+  if (opaqueCoverage(top) > 0.01) return top;
+  const bottom = cropAtlasFromFullRgba(pixels, texW, texH, rect, true);
+  if (opaqueCoverage(bottom) > 0) return bottom;
+  return top ?? bottom;
+}
+
+/** WebGL readPixels 为底原点，翻成顶左后再按 Cocos rect 裁切 */
+function flipRgbaVertical(buf: Uint8Array, w: number, h: number): Uint8Array {
+  const out = new Uint8Array(buf.length);
+  for (let row = 0; row < h; row++) {
+    const srcRow = h - 1 - row;
+    const srcOff = srcRow * w * 4;
+    const dstOff = row * w * 4;
+    out.set(buf.subarray(srcOff, srcOff + w * 4), dstOff);
+  }
+  return out;
+}
+
 function readViaWebGLFbo(
   gl: WebGLRenderingContext,
   glTex: WebGLTexture,
@@ -111,10 +151,9 @@ function readViaWebGLFbo(
 
     const full = new Uint8Array(texW * texH * 4);
     gl.readPixels(0, 0, texW, texH, gl.RGBA, gl.UNSIGNED_BYTE, full);
-
-    const top = cropAtlasFromFullRgba(full, texW, texH, rect, false);
-    if (top) return top;
-    return cropAtlasFromFullRgba(full, texW, texH, rect, true);
+    // readPixels 底原点 → 翻成顶左，再按 Cocos frame.rect 裁切
+    const topDown = flipRgbaVertical(full, texW, texH);
+    return cropAtlasFromFullRgba(topDown, texW, texH, rect, false);
   } catch (e) {
     logStep(`webgl-fbo: ${e}`);
     return null;
@@ -150,9 +189,12 @@ function readViaDeviceCopy(
       [fullBuf],
       [{ x: 0, y: 0, width: texW, height: texH }]
     );
-    const top = cropAtlasFromFullRgba(fullBuf, texW, texH, rect, false);
-    if (top) return top;
-    return cropAtlasFromFullRgba(fullBuf, texW, texH, rect, true);
+    // WebGL 后端 copy 多为底原点，与 readPixels 一致：先翻成顶左再裁
+    const topDown = flipRgbaVertical(fullBuf, texW, texH);
+    const flipped = cropAtlasFromFullRgba(topDown, texW, texH, rect, false);
+    if (opaqueCoverage(flipped) > 0.01) return flipped;
+    // 少数顶左设备：回退未翻转
+    return cropAtlasFromFullRgba(fullBuf, texW, texH, rect, false);
   } catch (e) {
     logStep(`device-copy: ${e}`);
     return null;
@@ -218,9 +260,60 @@ type DeviceLike = {
   copyTextureToBuffers: (
     texture: unknown,
     buffers: ArrayBufferView[],
-    regions: Array<{ x: number; y: number; width: number; height: number }>
+    regions: unknown[]
   ) => void;
 };
+
+/** Cocos 3.x BufferTextureCopy 区域（仅拷 rect，避免整张 2048 卡死） */
+function buildBufferTextureCopyRegion(rect: AtlasFrameRect): unknown {
+  return {
+    texOffset: { x: rect.x, y: rect.y, z: 0 },
+    texExtent: { width: rect.w, height: rect.h, depth: 1 },
+    texSubres: { mipLevel: 0, baseArrayLayer: 0, layerCount: 1 },
+    buffOffset: 0,
+    buffStride: 0,
+    buffTexHeight: 0,
+  };
+}
+
+function readViaDeviceRegionCopy(
+  texture: TextureRuntime,
+  rect: AtlasFrameRect
+): ImageData | null {
+  const ccg = window.cc as {
+    director?: { root?: { device?: DeviceLike } };
+  };
+  const device = ccg.director?.root?.device;
+  if (!device?.copyTextureToBuffers) return null;
+
+  const gfxTex =
+    typeof (texture as { getGFXTexture?: () => unknown }).getGFXTexture ===
+    'function'
+      ? (texture as { getGFXTexture: () => unknown }).getGFXTexture()
+      : null;
+  if (!gfxTex || rect.w <= 0 || rect.h <= 0) return null;
+
+  try {
+    const buf = new Uint8Array(rect.w * rect.h * 4);
+    device.copyTextureToBuffers(gfxTex, [buf], [
+      buildBufferTextureCopyRegion(rect),
+    ]);
+    const raw = new ImageData(new Uint8ClampedArray(buf), rect.w, rect.h);
+    const flipped = new ImageData(
+      new Uint8ClampedArray(flipRgbaVertical(buf, rect.w, rect.h)),
+      rect.w,
+      rect.h
+    );
+    const rawCov = opaqueCoverage(raw);
+    const flipCov = opaqueCoverage(flipped);
+    if (rawCov <= 0 && flipCov <= 0) return null;
+    // 区域 copy 原点因后端而异：覆盖率择优（同一逻辑区域的两种行序）
+    return flipCov > rawCov + 0.02 ? flipped : raw;
+  } catch (e) {
+    logStep(`device-region: ${e}`);
+    return null;
+  }
+}
 
 function flipBufferToImageData(
   buf: Uint8Array,
@@ -264,10 +357,29 @@ export function extractAtlasViaWebGL(
   const texH = Math.floor(texture.height ?? 0);
   if (texW <= 0 || texH <= 0) return null;
 
+  // 大图集：只拷 rect 区域，禁止整图回读（会卡死/超时）
+  const largeAtlas = texW * texH >= 1024 * 1024;
+  if (largeAtlas) {
+    const region = readViaDeviceRegionCopy(texture, rect);
+    if (region) {
+      logStep('device-region: ok (large atlas)');
+      return { imageData: region, method: 'device-copy' };
+    }
+    logStep('webgl: large atlas region-copy failed');
+    return null;
+  }
+
   const fromDevice = readViaDeviceCopy(texture, texW, texH, rect);
   if (fromDevice) {
     logStep('device-copy: ok');
     return { imageData: fromDevice, method: 'device-copy' };
+  }
+
+  // 小图集也可先试区域 copy（更快）
+  const region = readViaDeviceRegionCopy(texture, rect);
+  if (region) {
+    logStep('device-region: ok');
+    return { imageData: region, method: 'device-copy' };
   }
 
   const gl = getGameGl();
@@ -298,14 +410,12 @@ export function readFullAtlasImageData(
   return r?.imageData ?? null;
 }
 
-/** 从整图集缓冲裁切区域（左上原点，失败时尝试 GL 底原点） */
+/** 从整图集缓冲裁切区域（顶/底原点双裁按覆盖率择优） */
 export function cropAtlasRegion(
   pixels: Uint8ClampedArray,
   texW: number,
   texH: number,
   rect: AtlasFrameRect
 ): ImageData | null {
-  const top = cropAtlasFromFullRgba(pixels, texW, texH, rect, false);
-  if (top) return top;
-  return cropAtlasFromFullRgba(pixels, texW, texH, rect, true);
+  return pickCropByYOrigin(pixels, texW, texH, rect);
 }

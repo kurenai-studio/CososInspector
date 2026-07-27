@@ -99,6 +99,8 @@ npm install
 | 工具 | 作用 |
 |------|------|
 | `cocos_list_tabs` | 桥接是否连通 |
+| `cocos_page_info` | 试玩页信息（含 `paused`） |
+| `cocos_pause_game` / `cocos_resume_game` / `cocos_toggle_pause` | 暂停/恢复游戏以便查看节点属性 |
 | `cocos_list_sprites` | 列 UI Sprite（供 Agent 筛选） |
 | `cocos_screenshot` | `game` / `node` / `tab`（tab 用扩展截屏，无需 CDP） |
 | `cocos_download_texture` | 导出 PNG |
@@ -112,3 +114,20 @@ npm install
 风格替换流程：截屏 → 列 Sprite → 下载 → GenerateImage → `cocos_replace_texture` → 导出 → 重打包。
 
 **场景复刻**（试玩 → Creator）：读 `.cursor/skills/inspector-scene-recovery/SKILL.md`，详参 `docs/features/scene-recovery.md`。
+
+### HAR 扫粒子（资源 + 参数）
+
+从抓包 HAR 提取粒子 plist/贴图，以及 Prefab 上 `ParticleSystem2D` 的序列化参数（`custom` 覆盖）：
+
+```powershell
+npm run extract-har-particles -- play.godeebxp.com.har --out tmp/har-particles-all
+```
+
+输出 `manifest.json`：
+
+| kind | 含义 |
+|------|------|
+| `particleAsset` | plist 底稿参数（`paramSource: plist`） |
+| `particleComponent` | Prefab 节点上的对象参数（`paramSource: prefab`，优先） |
+
+同时落盘 `plists/`、`textures/`、`prefabs/`。
