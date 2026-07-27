@@ -4,7 +4,12 @@ declare namespace chrome {
     const lastError?: { message?: string };
     function sendMessage(
       message: unknown,
-      responseCallback?: (response?: unknown) => void
+      responseCallback?: (response: {
+        status?: string;
+        port?: number;
+        wsUrl?: string;
+        ok?: boolean;
+      }) => void
     ): void;
     const onMessage: {
       addListener: (
@@ -45,10 +50,6 @@ declare namespace chrome {
       windowId: number,
       options: { format: 'png' | 'jpeg' }
     ): Promise<string>;
-    function reload(
-      tabId: number,
-      reloadProperties?: { bypassCache?: boolean }
-    ): Promise<void>;
     const onUpdated: {
       addListener: (callback: () => void) => void;
     };
@@ -61,37 +62,5 @@ declare namespace chrome {
       func: (...args: unknown[]) => unknown;
       args?: unknown[];
     }): Promise<Array<{ result?: unknown }>>;
-  }
-
-  namespace debugger {
-    function attach(
-      target: { tabId: number },
-      requiredVersion: string,
-      callback?: () => void
-    ): void;
-    function detach(target: { tabId: number }, callback?: () => void): void;
-    function sendCommand(
-      target: { tabId: number },
-      method: string,
-      commandParams?: Record<string, unknown>,
-      callback?: (result?: unknown) => void
-    ): void;
-    const onEvent: {
-      addListener: (
-        callback: (
-          source: { tabId?: number },
-          method: string,
-          params?: Record<string, unknown>
-        ) => void
-      ) => void;
-    };
-    const onDetach: {
-      addListener: (
-        callback: (
-          source: { tabId?: number },
-          reason: string
-        ) => void
-      ) => void;
-    };
   }
 }
