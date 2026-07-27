@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Cocos Inspector 3",
-  "version": "2.1.3",
-  "description": "Cocos Creator 3.x 场景节点树只读查看",
+  "version": "2.2.0",
+  "description": "Cocos Creator 3.x / 2.x 场景节点树查看",
   "permissions": ["activeTab", "scripting", "tabs"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "background": {

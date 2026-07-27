@@ -3,8 +3,13 @@
 declare const __INSPECTOR_VERSION__: string;
 
 import { AssetFloatingPanel } from './cocos3/assetPanel';
-import { isCocos3, log, waitForCocos3 } from './cocos3/detect';
+import { log } from './cocos3/detect';
 import { installMcpBridge } from './cocos3/mcpBridge';
+import { startCocosInspector2 } from './cocos2/panel';
+import {
+  detectEngineFamily,
+  waitForEngine,
+} from './engine/detect';
 import {
   collectNodeInspectorData,
   createNodeInspectorElement,
@@ -81,11 +86,7 @@ class CocosInspector3 {
   private assetPanel = new AssetFloatingPanel();
 
   constructor() {
-    if (isCocos3()) {
-      this.init();
-    } else {
-      waitForCocos3(() => this.init());
-    }
+    this.init();
   }
 
   private init(): void {
@@ -786,4 +787,20 @@ class CocosInspector3 {
   }
 }
 
-new CocosInspector3();
+function bootInspector(): void {
+  const family = detectEngineFamily();
+  if (family === '3') {
+    new CocosInspector3();
+    return;
+  }
+  if (family === '2') {
+    startCocosInspector2();
+    return;
+  }
+  waitForEngine((ready) => {
+    if (ready === '3') new CocosInspector3();
+    else startCocosInspector2();
+  });
+}
+
+bootInspector();
