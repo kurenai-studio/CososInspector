@@ -112,6 +112,15 @@ export class HarCaptureSession {
       maxPostDataSize: MAX_BODY_BYTES,
     });
     await this.send('Network.setCacheDisabled', { cacheDisabled: true });
+    try {
+      await this.send('Network.clearBrowserCache');
+    } catch (e) {
+      // 部分环境无此命令，禁缓存 + bypassCache 仍可兜底
+      console.warn(
+        `[HAR抓包] tab=${this.tabId} - clearBrowserCache 失败: ` +
+          `${e instanceof Error ? e.message : String(e)}`
+      );
+    }
     this.recording = true;
   }
 

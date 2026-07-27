@@ -7,12 +7,12 @@
 解决痛点：
 
 - 不必打开 F12（许多试玩页有反调试）
-- 自动 `Network.setCacheDisabled(true)`，避免磁盘缓存条目 `size: 0` / 无 base64（如 PG Soft CDN）
+- 开始录制时自动：**清浏览器缓存** + `setCacheDisabled` + `tabs.reload({ bypassCache: true })`，避免磁盘缓存条目 `size: 0` / 无 base64
 
 ## 面板用法（2.x / 3.x）
 
 1. 打开试玩页，等 Inspector 面板出现  
-2. 点 **录HAR** → 扩展 attach debugger、禁缓存并 **强制刷新**  
+2. 点 **录HAR** → attach debugger → 清缓存 → **强制无缓存刷新**  
 3. 等资源加载完（状态栏显示请求数 / 含 body 数 / 图片数）  
 4. 点 **停HAR**（或再点录制按钮切换）  
 5. 点 **导出HAR** → 浏览器下载 `.har`

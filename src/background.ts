@@ -251,11 +251,14 @@ async function harStart(
   const pageUrl = opts.pageUrl ?? '';
   const pageTitle = opts.pageTitle ?? '';
   await session.start(pageUrl, pageTitle);
-  console.log(`[HAR抓包] tab=${tabId} - 开始录制 cacheDisabled=true`);
+  console.log(
+    `[HAR抓包] tab=${tabId} - 开始录制 cacheDisabled + clearBrowserCache`
+  );
 
   if (opts.reload) {
     try {
       await chrome.tabs.reload(tabId, { bypassCache: true });
+      console.log(`[HAR抓包] tab=${tabId} - 已 bypassCache 强制刷新`);
     } catch (e) {
       session.lastError =
         e instanceof Error ? e.message : `reload failed: ${String(e)}`;

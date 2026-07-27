@@ -753,7 +753,7 @@ class CocosInspector3 {
       this.syncHarButtons();
       this.startHarPoll();
       this.setStatus(
-        `HAR 录制中（已禁缓存并刷新）· ${formatHarStats(res.stats)}`
+        `HAR 录制中（已清缓存并强制刷新）· ${formatHarStats(res.stats)}`
       );
       console.log(`[HAR抓包] 开始录制`);
     } catch (e) {
