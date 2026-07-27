@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, readFileSync } from 'fs';
+import { writeFileSync, mkdirSync, readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { spawnSync } from 'child_process';
@@ -81,10 +81,18 @@ async function build() {
     }
   }
 
-  copyFileSync(
-    join(root, 'src/styles/inspector.css'),
-    join(dist, 'inspector.css')
-  );
+  // Chrome 要求扩展资源为合法 UTF-8；避免 copy 带入 GBK 残片
+  const cssSrc = join(root, 'src/styles/inspector.css');
+  const cssDst = join(dist, 'inspector.css');
+  const cssBuf = readFileSync(cssSrc);
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(cssBuf);
+  } catch (e) {
+    throw new Error(
+      `src/styles/inspector.css 不是合法 UTF-8，无法打包扩展: ${e.message}`
+    );
+  }
+  writeFileSync(cssDst, cssBuf);
   console.log('build ok → dist/');
 }
 
