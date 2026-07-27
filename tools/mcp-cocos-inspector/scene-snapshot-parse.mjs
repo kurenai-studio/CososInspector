@@ -155,3 +155,88 @@ export const collectUiSizeBindings = (snapshotRoot, pathMap) => {
   walk(snapshotRoot);
   return bindings;
 };
+
+/** 从组件行解析 Label（中英标签） */
+export const parseLabelFromNode = (ch) => {
+  const lab = (ch.components || []).find(
+    (c) => /Label/.test(c.typeName || '') && !/RichText/.test(c.typeName || '')
+  );
+  if (!lab?.rows?.length) return null;
+  const textRow = findCompRow(lab.rows, '文本', 'string', 'string');
+  const fontRow = findCompRow(lab.rows, '字号', 'fontSize');
+  const lineRow = findCompRow(lab.rows, '行高', 'lineHeight');
+  const colorRow = findCompRow(lab.rows, '颜色', 'color');
+  const overflowRow = findCompRow(lab.rows, '溢出', 'overflow');
+  let text = String(textRow?.value ?? '');
+  if (text === '(空)') text = '';
+  if (text.endsWith('…')) {
+    // 截断文本无法完整还原，仍写入可见前缀
+    text = text.slice(0, -1);
+  }
+  const fontSize = parseFloat(String(fontRow?.value ?? ''));
+  const lineHeight = parseFloat(String(lineRow?.value ?? ''));
+  const overflow = parseInt(String(overflowRow?.value ?? ''), 10);
+  let color = null;
+  if (colorRow?.value && colorRow.value !== '-') {
+    const m = String(colorRow.value).match(
+      /(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*(\d+))?/
+    );
+    if (m) {
+      color = {
+        r: +m[1],
+        g: +m[2],
+        b: +m[3],
+        a: m[4] != null ? +m[4] : 255,
+      };
+    }
+  }
+  return {
+    string: text,
+    fontSize: Number.isFinite(fontSize) ? fontSize : null,
+    lineHeight: Number.isFinite(lineHeight) ? lineHeight : null,
+    overflow: Number.isFinite(overflow) ? overflow : null,
+    color,
+  };
+};
+
+/** Widget 对齐边距（「-」表示未启用该边） */
+export const parseWidgetFromNode = (ch) => {
+  const w = (ch.components || []).find((c) => /Widget/.test(c.typeName || ''));
+  if (!w?.rows?.length) return null;
+  const edge = (labels) => {
+    const row = findCompRow(w.rows, ...labels);
+    if (!row || row.value === '-' || row.value == null) {
+      return { enabled: false, value: 0 };
+    }
+    const v = parseFloat(String(row.value));
+    return { enabled: true, value: Number.isFinite(v) ? v : 0 };
+  };
+  return {
+    left: edge(['左', 'left']),
+    right: edge(['右', 'right']),
+    top: edge(['上', 'top']),
+    bottom: edge(['下', 'bottom']),
+    alignHCenter:
+      findCompRow(w.rows, '水平居中')?.value === '是' ||
+      findCompRow(w.rows, 'isAlignHorizontalCenter')?.value === 'true',
+    alignVCenter:
+      findCompRow(w.rows, '垂直居中')?.value === '是' ||
+      findCompRow(w.rows, 'isAlignVerticalCenter')?.value === 'true',
+  };
+};
+
+export const parseSpineFromNode = (ch) => {
+  const sp = (ch.components || []).find(
+    (c) =>
+      c.flags?.isSpine ||
+      (/Spine|Skeleton/.test(c.typeName || '') && !/Sprite/.test(c.typeName || ''))
+  );
+  if (!sp) return null;
+  const animRow = findCompRow(sp.rows, '动画', 'animation', 'defaultAnimation');
+  const skelRow = findCompRow(sp.rows, '骨架', 'skeletonData');
+  return {
+    animation: animRow?.value && animRow.value !== '-' ? String(animRow.value) : '',
+    skeletonName:
+      skelRow?.value && skelRow.value !== '-' ? String(skelRow.value) : '',
+  };
+};

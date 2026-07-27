@@ -155,6 +155,7 @@ npm run cocos-scene-to-creator -- tmp/godeebxp-scene-snapshot.json `
 | C | 批量 Sprite 纹理导出、manifest、磁盘绑定 | 🔄 可用（path 匹配 live id） |
 | D | Spine/Label/脚本组件占位 / TS 还原 | 待做 |
 | E | Creator 2.x 快照 → 3.x 复刻（P3a） | ✅ 路径/sizeMode/设计分辨率/Camera |
+| F | Label / Widget / Spine 占位（P3b） | ✅ 文本与对齐可还原；Spine 无骨架资源 |
 
 ## Creator 2.x → 3.x（P3a）
 
@@ -163,6 +164,14 @@ npm run cocos-scene-to-creator -- tmp/godeebxp-scene-snapshot.json `
 - path 分隔符 ` › `（旧 `/` 快照工具侧归一）
 - `spriteFrame.sizeMode` 已映射为 **3.x 枚举**
 - 顶栏 `designResolution` 优先；无 Camera 时补丁可合成 Camera 节点
+
+### P3b（Label / Widget / Spine）
+
+重建脚本对每个节点额外：
+
+- `cc.Label`：string / fontSize / lineHeight / color / overflow  
+- `cc.Widget`：四边对齐与边距  
+- `sp.Skeleton`：组件占位 + `defaultAnimation`（不绑 skeletonData）  
 
 详见 [cocos2-support.md](cocos2-support.md)。
 
@@ -176,4 +185,4 @@ npm run cocos-scene-to-creator -- tmp/godeebxp-scene-snapshot.json `
 - `src/cocos3/mcpBridge.ts` / `src/cocos2/mcpBridge.ts` — 页面 API
 - `tools/mcp-cocos-inspector/index.mjs` — MCP 工具
 - `tools/mcp-cocos-inspector/scene-to-creator.mjs` — Creator 重建
-- `tools/mcp-cocos-inspector/scene-snapshot-parse.mjs` — path/UI/sizeMode 解析（2.x/3.x）
+- `tools/mcp-cocos-inspector/scene-snapshot-parse.mjs` — path/UI/sizeMode/Label/Widget 解析

@@ -724,6 +724,184 @@ function parseSpriteSizeMode(ch) {
   return Number.isFinite(v) ? v : null;
 }
 
+function findRow(rows, labels) {
+  if (!rows?.length) return null;
+  const set = new Set(labels.map((l) => String(l).toLowerCase()));
+  return rows.find((r) => set.has(String(r.label ?? '').toLowerCase())) || null;
+}
+
+function parseLabelFromNode(ch) {
+  const lab = (ch.components || []).find(
+    (c) => /Label/.test(c.typeName || '') && !/RichText/.test(c.typeName || '')
+  );
+  if (!lab?.rows?.length) return null;
+  const textRow = findRow(lab.rows, ['文本', 'string']);
+  const fontRow = findRow(lab.rows, ['字号', 'fontSize']);
+  const lineRow = findRow(lab.rows, ['行高', 'lineHeight']);
+  const colorRow = findRow(lab.rows, ['颜色', 'color']);
+  const overflowRow = findRow(lab.rows, ['溢出', 'overflow']);
+  let text = String(textRow?.value ?? '');
+  if (text === '(空)') text = '';
+  if (text.endsWith('…')) text = text.slice(0, -1);
+  const fontSize = parseFloat(String(fontRow?.value ?? ''));
+  const lineHeight = parseFloat(String(lineRow?.value ?? ''));
+  const overflow = parseInt(String(overflowRow?.value ?? ''), 10);
+  let color = null;
+  if (colorRow?.value && colorRow.value !== '-') {
+    const m = String(colorRow.value).match(
+      /(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)\\s*(?:,\\s*(\\d+))?/
+    );
+    if (m) color = { r: +m[1], g: +m[2], b: +m[3], a: m[4] != null ? +m[4] : 255 };
+  }
+  return {
+    string: text,
+    fontSize: Number.isFinite(fontSize) ? fontSize : null,
+    lineHeight: Number.isFinite(lineHeight) ? lineHeight : null,
+    overflow: Number.isFinite(overflow) ? overflow : null,
+    color,
+  };
+}
+
+function parseWidgetFromNode(ch) {
+  const w = (ch.components || []).find((c) => /Widget/.test(c.typeName || ''));
+  if (!w?.rows?.length) return null;
+  const edge = (labels) => {
+    const row = findRow(w.rows, labels);
+    if (!row || row.value === '-' || row.value == null) return { enabled: false, value: 0 };
+    const v = parseFloat(String(row.value));
+    return { enabled: true, value: Number.isFinite(v) ? v : 0 };
+  };
+  return {
+    left: edge(['左', 'left']),
+    right: edge(['右', 'right']),
+    top: edge(['上', 'top']),
+    bottom: edge(['下', 'bottom']),
+    alignHCenter: findRow(w.rows, ['水平居中'])?.value === '是',
+    alignVCenter: findRow(w.rows, ['垂直居中'])?.value === '是',
+  };
+}
+
+function parseSpineFromNode(ch) {
+  const sp = (ch.components || []).find(
+    (c) =>
+      c.flags?.isSpine ||
+      (/Spine|Skeleton/.test(c.typeName || '') && !/Sprite/.test(c.typeName || ''))
+  );
+  if (!sp) return null;
+  const animRow = findRow(sp.rows || [], ['动画', 'animation', 'defaultAnimation']);
+  return {
+    animation: animRow?.value && animRow.value !== '-' ? String(animRow.value) : '',
+  };
+}
+
+async function applyLabel(nodeUuid, ch) {
+  const lab = parseLabelFromNode(ch);
+  if (!lab) return false;
+  await ensureComponent(nodeUuid, 'cc.Label');
+  try {
+    await Editor.Message.request('scene', 'set-property', {
+      uuid: nodeUuid,
+      path: 'cc.Label.string',
+      dump: { value: lab.string },
+    });
+  } catch (_) {}
+  if (lab.fontSize != null) {
+    try {
+      await Editor.Message.request('scene', 'set-property', {
+        uuid: nodeUuid,
+        path: 'cc.Label.fontSize',
+        dump: { value: lab.fontSize },
+      });
+    } catch (_) {}
+  }
+  if (lab.lineHeight != null) {
+    try {
+      await Editor.Message.request('scene', 'set-property', {
+        uuid: nodeUuid,
+        path: 'cc.Label.lineHeight',
+        dump: { value: lab.lineHeight },
+      });
+    } catch (_) {}
+  }
+  if (lab.overflow != null) {
+    try {
+      await Editor.Message.request('scene', 'set-property', {
+        uuid: nodeUuid,
+        path: 'cc.Label.overflow',
+        dump: { value: lab.overflow },
+      });
+    } catch (_) {}
+  }
+  if (lab.color) {
+    try {
+      await Editor.Message.request('scene', 'set-property', {
+        uuid: nodeUuid,
+        path: 'cc.Label.color',
+        dump: {
+          type: 'cc.Color',
+          value: lab.color,
+        },
+      });
+    } catch (_) {}
+  }
+  return true;
+}
+
+async function applyWidget(nodeUuid, ch) {
+  const w = parseWidgetFromNode(ch);
+  if (!w) return false;
+  await ensureComponent(nodeUuid, 'cc.Widget');
+  const setBool = async (path, v) => {
+    try {
+      await Editor.Message.request('scene', 'set-property', {
+        uuid: nodeUuid,
+        path,
+        dump: { value: !!v },
+      });
+    } catch (_) {}
+  };
+  const setNum = async (path, v) => {
+    try {
+      await Editor.Message.request('scene', 'set-property', {
+        uuid: nodeUuid,
+        path,
+        dump: { value: v },
+      });
+    } catch (_) {}
+  };
+  await setBool('cc.Widget.isAlignLeft', w.left.enabled);
+  await setBool('cc.Widget.isAlignRight', w.right.enabled);
+  await setBool('cc.Widget.isAlignTop', w.top.enabled);
+  await setBool('cc.Widget.isAlignBottom', w.bottom.enabled);
+  await setBool('cc.Widget.isAlignHorizontalCenter', !!w.alignHCenter);
+  await setBool('cc.Widget.isAlignVerticalCenter', !!w.alignVCenter);
+  if (w.left.enabled) await setNum('cc.Widget.left', w.left.value);
+  if (w.right.enabled) await setNum('cc.Widget.right', w.right.value);
+  if (w.top.enabled) await setNum('cc.Widget.top', w.top.value);
+  if (w.bottom.enabled) await setNum('cc.Widget.bottom', w.bottom.value);
+  return true;
+}
+
+async function applySpinePlaceholder(nodeUuid, ch) {
+  const sp = parseSpineFromNode(ch);
+  if (!sp) return false;
+  try {
+    await ensureComponent(nodeUuid, 'sp.Skeleton');
+  } catch (_) {
+    return false;
+  }
+  if (sp.animation) {
+    try {
+      await Editor.Message.request('scene', 'set-property', {
+        uuid: nodeUuid,
+        path: 'sp.Skeleton.defaultAnimation',
+        dump: { value: sp.animation },
+      });
+    } catch (_) {}
+  }
+  return true;
+}
+
 function recordUiBinding(out, nodeUuid, ui) {
   const w = ui?.contentSize?.width;
   const h = ui?.contentSize?.height;
@@ -810,6 +988,9 @@ const created = [];
 const spritesBound = [];
 const spriteBindings = [];
 const uiSizeBindings = [];
+const labelsApplied = [];
+const widgetsApplied = [];
+const spinesApplied = [];
 let count = 0;
 
 async function walk(src, parentUuid, depth) {
@@ -892,6 +1073,11 @@ async function walk(src, parentUuid, depth) {
       recordUiBinding(uiSizeBindings, nodeUuid, uiParsed);
     }
 
+    // Label / Widget / Spine 占位（可与 Sprite 同节点）
+    if (await applyLabel(nodeUuid, ch)) labelsApplied.push(ch.path || ch.name);
+    if (await applyWidget(nodeUuid, ch)) widgetsApplied.push(ch.path || ch.name);
+    if (await applySpinePlaceholder(nodeUuid, ch)) spinesApplied.push(ch.path || ch.name);
+
     await walk(ch, nodeUuid, depth + 1);
   }
 }
@@ -911,10 +1097,16 @@ return {
   design,
   createdCount: created.length,
   spritesBoundCount: spritesBound.length,
+  labelsAppliedCount: labelsApplied.length,
+  widgetsAppliedCount: widgetsApplied.length,
+  spinesAppliedCount: spinesApplied.length,
   spriteBindings,
   uiSizeBindings,
   createdSample: created.slice(0, 15),
   spritesBoundSample: spritesBound.slice(0, 15),
+  labelsSample: labelsApplied.slice(0, 10),
+  widgetsSample: widgetsApplied.slice(0, 10),
+  spinesSample: spinesApplied.slice(0, 10),
   diskSize,
 };
 `;

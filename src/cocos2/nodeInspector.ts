@@ -120,10 +120,28 @@ const inspectComponent = (comp: unknown): ComponentInspectInfo => {
     push('spriteFrame', frame?.name || frame?._name || '(frame)');
     push('sizeMode', sizeMode3);
   }
-  if (/Label/i.test(shortName)) {
-    push('string', c.string ?? c._string);
-    push('fontSize', c.fontSize ?? c._fontSize);
-    push('lineHeight', c.lineHeight ?? c._lineHeight);
+  if (/Label/i.test(shortName) && !/RichText/i.test(shortName)) {
+    const text = String(c.string ?? c._string ?? '');
+    // 快照需完整文本；面板渲染侧再截断
+    push('文本', text || '(空)');
+    push('字号', c.fontSize ?? c._fontSize);
+    push('行高', c.lineHeight ?? c._lineHeight);
+    const col = c.color ?? c._color;
+    if (col && typeof col === 'object') {
+      const o = col as { r?: number; g?: number; b?: number; a?: number };
+      push(
+        '颜色',
+        `${o.r ?? 255},${o.g ?? 255},${o.b ?? 255},${o.a ?? 255}`
+      );
+    }
+    push('溢出', c.overflow ?? c._overflow ?? c.Overflow);
+    push('水平对齐', c.horizontalAlign ?? c._N$horizontalAlign);
+    push('垂直对齐', c.verticalAlign ?? c._N$verticalAlign);
+  }
+  if (/RichText/i.test(shortName)) {
+    const text = String(c.string ?? c._string ?? '');
+    push('文本', text || '(空)');
+    push('字号', c.fontSize ?? c._fontSize);
   }
   if (/Mask/i.test(shortName)) {
     push('类型', c._type ?? c.type ?? 0);
@@ -136,8 +154,44 @@ const inspectComponent = (comp: unknown): ComponentInspectInfo => {
       push('设计分辨率', `${Math.round(dr.width ?? 0)}×${Math.round(dr.height ?? 0)}`);
     }
   }
+  if (/Spine|Skeleton/i.test(shortName) && !/Sprite/i.test(shortName)) {
+    const data = c._skeletonData ?? c.skeletonData;
+    const dataName =
+      data && typeof data === 'object'
+        ? String(
+            (data as { name?: string; _name?: string }).name ||
+              (data as { _name?: string })._name ||
+              '(skeleton)'
+          )
+        : '-';
+    push('骨架', dataName);
+    push('动画', c.animation ?? c.defaultAnimation ?? c._animation ?? '-');
+  }
   if (/Widget/i.test(shortName)) {
-    push('isAlignTop', c.isAlignTop ?? c._alignFlags);
+    const alignFlags = Number(c.alignFlags ?? c._alignFlags ?? 0);
+    const isLeft =
+      typeof c.isAlignLeft === 'boolean'
+        ? c.isAlignLeft
+        : !!(alignFlags & 8);
+    const isRight =
+      typeof c.isAlignRight === 'boolean'
+        ? c.isAlignRight
+        : !!(alignFlags & 32);
+    const isTop =
+      typeof c.isAlignTop === 'boolean'
+        ? c.isAlignTop
+        : !!(alignFlags & 1);
+    const isBottom =
+      typeof c.isAlignBottom === 'boolean'
+        ? c.isAlignBottom
+        : !!(alignFlags & 4);
+    push('对齐', c.alignMode ?? c._alignMode ?? '-');
+    push('左', isLeft ? (c.left ?? c._left ?? 0) : '-');
+    push('右', isRight ? (c.right ?? c._right ?? 0) : '-');
+    push('上', isTop ? (c.top ?? c._top ?? 0) : '-');
+    push('下', isBottom ? (c.bottom ?? c._bottom ?? 0) : '-');
+    push('水平居中', c.isAlignHorizontalCenter ? '是' : '否');
+    push('垂直居中', c.isAlignVerticalCenter ? '是' : '否');
   }
 
   if (rows.length === 0) {
@@ -211,12 +265,15 @@ export function renderNodeInspectorHtml(data: NodeInspectorData | null): string 
   const blocks = data.components
     .map((comp) => {
       const rows = comp.rows
-        .map(
-          (r) =>
-            `<div class="insp-row"><span class="insp-label">${escapeHtml(
-              r.label
-            )}</span><span class="insp-value">${escapeHtml(r.value)}</span></div>`
-        )
+        .map((r) => {
+          let display = r.value;
+          if (r.label === '文本' && display.length > 48) {
+            display = `${display.slice(0, 48)}…`;
+          }
+          return `<div class="insp-row"><span class="insp-label">${escapeHtml(
+            r.label
+          )}</span><span class="insp-value">${escapeHtml(display)}</span></div>`;
+        })
         .join('');
       const stateBadge = comp.enabled
         ? '<span class="insp-badge insp-badge-on">启用</span>'
