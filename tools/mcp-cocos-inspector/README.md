@@ -103,6 +103,9 @@ npm install
 | `cocos_pause_game` / `cocos_resume_game` / `cocos_toggle_pause` | 暂停/恢复游戏以便查看节点属性 |
 | `cocos_list_sprites` | 列 UI Sprite（供 Agent 筛选） |
 | `cocos_screenshot` | `game` / `node` / `tab`（tab 用扩展截屏，无需 CDP） |
+| `cocos_har_start` | 开始 HAR 抓包（扩展 debugger，禁缓存，默认可刷新） |
+| `cocos_har_status` | HAR 录制统计 |
+| `cocos_har_stop_export` | 停止并导出 HAR（share / outPath） |
 | `cocos_download_texture` | 导出 PNG |
 | `cocos_texture_extract_logs` | 纹理提取诊断日志（localStorage，可 `nodeUUID` 过滤） |
 | `cocos_replace_texture` | base64 替换预览 |

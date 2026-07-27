@@ -1,7 +1,7 @@
 # Cocos Inspector 3 文档索引
 
 当前主能力：**试玩页场景读取（S）+ Creator 场景复刻（P）+ MCP 自动化**。  
-**v3.0.0**：同一扩展正式支持 Creator **3.x + 2.x（含 2.4）**（版本见 `package.json`）。
+**v3.1.0**：扩展内置 **HAR 抓包**（CDP，无需 F12）；同一扩展支持 Creator **3.x + 2.x（含 2.4）**。
 
 ## Agent Skills（本仓库）
 
@@ -18,6 +18,7 @@
 
 | 文档 | 说明 |
 |------|------|
+| [har-capture.md](features/har-capture.md) | 扩展内 HAR 抓包（面板 + MCP） |
 | [cocos2-support.md](features/cocos2-support.md) | Creator 2.x（含 2.4）P0–P8a 支持 |
 | [scene-recovery.md](features/scene-recovery.md) | Inspector → Creator 场景恢复（详细） |
 | [inspector-mcp-multi-instance.md](features/inspector-mcp-multi-instance.md) | 多试玩域 MCP 桥接 |

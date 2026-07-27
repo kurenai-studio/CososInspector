@@ -52,6 +52,7 @@ import {
   maxPerfDc,
   renderTreeHtml,
 } from './cocos3/treeRender';
+import { callHarCmd, formatHarStats } from './har/harPanel';
 
 const REFRESH_MS = 500;
 
@@ -70,6 +71,10 @@ class CocosInspector3 {
   private clearScanBtn: HTMLButtonElement | null = null;
   private assetBtn: HTMLButtonElement | null = null;
   private pauseBtn: HTMLButtonElement | null = null;
+  private harRecordBtn: HTMLButtonElement | null = null;
+  private harExportBtn: HTMLButtonElement | null = null;
+  private harRecording = false;
+  private harPollTimer: number | null = null;
 
   private expandedScene = new Set<string>();
   private selectedId: string | null = null;
@@ -218,6 +223,23 @@ class CocosInspector3 {
     this.assetBtn.title = '打开资源加载状态浮窗';
     this.assetBtn.addEventListener('click', () => this.assetPanel.toggle());
     controls.appendChild(this.assetBtn);
+
+    this.harRecordBtn = document.createElement('button');
+    this.harRecordBtn.type = 'button';
+    this.harRecordBtn.className = 'har-record-btn';
+    this.harRecordBtn.textContent = '录HAR';
+    this.harRecordBtn.title =
+      '开始/停止 HAR 抓包（扩展 CDP，无需 F12；会禁缓存并可能显示调试条）';
+    this.harRecordBtn.addEventListener('click', () => void this.toggleHarRecord());
+    controls.appendChild(this.harRecordBtn);
+
+    this.harExportBtn = document.createElement('button');
+    this.harExportBtn.type = 'button';
+    this.harExportBtn.className = 'har-export-btn';
+    this.harExportBtn.textContent = '导出HAR';
+    this.harExportBtn.title = '导出当前已抓取的 HAR（含 response body）';
+    this.harExportBtn.addEventListener('click', () => void this.exportHar());
+    controls.appendChild(this.harExportBtn);
 
     this.searchInput = document.createElement('input');
     this.searchInput.type = 'search';
@@ -673,6 +695,94 @@ class CocosInspector3 {
     this.pauseBtn.title = paused
       ? '恢复游戏（director.resume）'
       : '暂停游戏（director.pause），便于停住后查看节点属性';
+  }
+
+  private syncHarButtons(): void {
+    if (this.harRecordBtn) {
+      this.harRecordBtn.textContent = this.harRecording ? '停HAR' : '录HAR';
+      this.harRecordBtn.classList.toggle('har-record-btn--active', this.harRecording);
+    }
+  }
+
+  private startHarPoll(): void {
+    this.stopHarPoll();
+    this.harPollTimer = window.setInterval(() => {
+      void callHarCmd('status').then((res) => {
+        if (!res?.ok || !res.stats) return;
+        this.harRecording = !!res.stats.recording;
+        this.syncHarButtons();
+        if (this.harRecording) {
+          this.setStatus(`HAR 录制中 · ${formatHarStats(res.stats)}`);
+        }
+      });
+    }, 1500);
+  }
+
+  private stopHarPoll(): void {
+    if (this.harPollTimer != null) {
+      window.clearInterval(this.harPollTimer);
+      this.harPollTimer = null;
+    }
+  }
+
+  private async toggleHarRecord(): Promise<void> {
+    try {
+      if (this.harRecording) {
+        const res = await callHarCmd('stop');
+        this.harRecording = false;
+        this.stopHarPoll();
+        this.syncHarButtons();
+        if (!res?.ok) {
+          this.setStatus(`停止 HAR 失败: ${res?.error ?? 'unknown'}`);
+          return;
+        }
+        this.setStatus(`HAR 已停止 · ${formatHarStats(res.stats)}`);
+        console.log(
+          `[HAR抓包] 停止 ${formatHarStats(res.stats)}`
+        );
+        return;
+      }
+
+      const res = await callHarCmd('start', { reload: true });
+      if (!res?.ok) {
+        this.setStatus(`开始 HAR 失败: ${res?.error ?? 'unknown'}`);
+        console.error(`[HAR抓包] 开始失败: ${res?.error}`);
+        return;
+      }
+      this.harRecording = true;
+      this.syncHarButtons();
+      this.startHarPoll();
+      this.setStatus(
+        `HAR 录制中（已禁缓存并刷新）· ${formatHarStats(res.stats)}`
+      );
+      console.log(`[HAR抓包] 开始录制`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.setStatus(`HAR 操作失败: ${msg}`);
+      console.error(`[HAR抓包] 异常: ${msg}`);
+    }
+  }
+
+  private async exportHar(): Promise<void> {
+    try {
+      this.setStatus('正在导出 HAR…');
+      const res = await callHarCmd('export', { stop: false });
+      if (!res?.ok) {
+        this.setStatus(`导出 HAR 失败: ${res?.error ?? 'unknown'}`);
+        console.error(`[HAR抓包] 导出失败: ${res?.error}`);
+        return;
+      }
+      this.setStatus(
+        `HAR 已下载 ${res.filename ?? ''} · ${formatHarStats(res.stats)}`
+      );
+      console.log(
+        `[HAR抓包] 导出 ${res.filename} · ${formatHarStats(res.stats)}`
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.setStatus(`导出 HAR 失败: ${msg}`);
+      console.error(`[HAR抓包] 导出异常: ${msg}`);
+    }
   }
 
   private refreshInspector(force: boolean): void {

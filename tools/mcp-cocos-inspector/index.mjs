@@ -97,6 +97,8 @@ const BRIDGE_TIMEOUT_BY_METHOD = {
   listSpines: 120_000,
   listBmfonts: 120_000,
   exportSceneSnapshot: 300_000,
+  __harStopExport: 300_000,
+  __harStart: 120_000,
 };
 
 async function apiCall(method, argList, opts) {
@@ -500,6 +502,57 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           cdpPort: { type: 'number' },
         },
         required: ['outPath'],
+      },
+    },
+    {
+      name: 'cocos_har_start',
+      description:
+        '开始 HAR 抓包（扩展 chrome.debugger + Network.setCacheDisabled，无需 F12）。默认会刷新页面以重新拉取资源 body',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          reload: {
+            type: 'boolean',
+            description: '开始后是否 bypassCache 刷新，默认 true',
+          },
+          pageUrlMatch: { type: 'string' },
+          domain: { type: 'string' },
+          wsPort: { type: 'number' },
+        },
+      },
+    },
+    {
+      name: 'cocos_har_status',
+      description: '查询当前标签 HAR 录制状态（请求数 / 含 body 数 / 图片数）',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          pageUrlMatch: { type: 'string' },
+          domain: { type: 'string' },
+          wsPort: { type: 'number' },
+        },
+      },
+    },
+    {
+      name: 'cocos_har_stop_export',
+      description:
+        '停止 HAR 录制并导出。默认经 share 通道落盘；可指定 outPath 复制到目标路径',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          outPath: {
+            type: 'string',
+            description: '保存 .har 路径（可选；不传则只返回 sharePath）',
+          },
+          filename: { type: 'string', description: 'HAR 文件名，默认域名.har' },
+          stop: {
+            type: 'boolean',
+            description: '是否停止录制，默认 true',
+          },
+          pageUrlMatch: { type: 'string' },
+          domain: { type: 'string' },
+          wsPort: { type: 'number' },
+        },
       },
     },
   ],
@@ -1065,6 +1118,84 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           {
             type: 'text',
             text: JSON.stringify({ saved: outPath, ...meta }, null, 2),
+          },
+        ],
+      };
+    }
+
+    if (name === 'cocos_har_start') {
+      const target = await waitExt(opts);
+      const callOpts = {
+        pageUrlMatch: opts.pageUrlMatch ?? target.pageUrlMatch ?? '',
+        timeoutMs: 120_000,
+      };
+      const res = await callBridgeAtPort(
+        target.wsPort,
+        '__harStart',
+        [{ reload: args?.reload !== false }],
+        callOpts
+      );
+      return {
+        content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+        isError: !res?.ok,
+      };
+    }
+
+    if (name === 'cocos_har_status') {
+      const target = await waitExt(opts);
+      const callOpts = {
+        pageUrlMatch: opts.pageUrlMatch ?? target.pageUrlMatch ?? '',
+        timeoutMs: 30_000,
+      };
+      const res = await callBridgeAtPort(
+        target.wsPort,
+        '__harStatus',
+        [{}],
+        callOpts
+      );
+      return {
+        content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+        isError: !res?.ok,
+      };
+    }
+
+    if (name === 'cocos_har_stop_export') {
+      const target = await waitExt(opts);
+      const callOpts = {
+        pageUrlMatch: opts.pageUrlMatch ?? target.pageUrlMatch ?? '',
+        timeoutMs: 300_000,
+      };
+      const res = await callBridgeAtPort(
+        target.wsPort,
+        '__harStopExport',
+        [
+          {
+            delivery: 'share',
+            filename: args?.filename,
+            stop: args?.stop !== false,
+            wsPort: target.wsPort,
+          },
+        ],
+        callOpts
+      );
+      if (!res?.ok) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+          isError: true,
+        };
+      }
+      let saved = null;
+      if (args?.outPath && res.sharePath) {
+        const outPath = resolve(args.outPath);
+        mkdirSync(dirname(outPath), { recursive: true });
+        copyFileSync(resolveSharePath(res.sharePath), outPath);
+        saved = outPath;
+      }
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({ ...res, saved }, null, 2),
           },
         ],
       };
