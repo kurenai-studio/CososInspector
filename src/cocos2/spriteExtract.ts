@@ -421,3 +421,55 @@ export function downloadExtractPng(result: Cc2SpriteExtractResult): void {
   a.click();
   document.body.removeChild(a);
 }
+
+/** 整张 Texture2D → ImageData（Spine/BMFont 导出用） */
+export async function extractFullTexturePixels2x(
+  tex: unknown
+): Promise<{
+  imageData: ImageData;
+  method: string;
+  width: number;
+  height: number;
+} | null> {
+  if (!tex || typeof tex !== 'object') return null;
+  const t = tex as TexLike;
+  const src = resolveImageSource(t);
+  if (!src) {
+    console.warn('[纹理提取:2.x] 整图 - 无 HTML 图像源');
+    return null;
+  }
+  try {
+    await waitImage(src);
+  } catch (e) {
+    console.error('[纹理提取:2.x] 整图 - 图像未就绪', e);
+    return null;
+  }
+
+  let w = Math.floor(t.width ?? 0);
+  let h = Math.floor(t.height ?? 0);
+  if (src instanceof HTMLImageElement) {
+    if (!w) w = src.naturalWidth;
+    if (!h) h = src.naturalHeight;
+  } else if (src instanceof HTMLCanvasElement) {
+    if (!w) w = src.width;
+    if (!h) h = src.height;
+  } else if (typeof ImageBitmap !== 'undefined' && src instanceof ImageBitmap) {
+    if (!w) w = src.width;
+    if (!h) h = src.height;
+  }
+  if (w <= 0 || h <= 0) return null;
+
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(src, 0, 0, w, h);
+    const imageData = ctx.getImageData(0, 0, w, h);
+    return { imageData, method: 'dom-full', width: w, height: h };
+  } catch (e) {
+    console.error('[纹理提取:2.x] 整图 drawImage 失败', e);
+    return null;
+  }
+}

@@ -18,6 +18,10 @@ export interface ComponentInspectInfo {
   enabled: boolean;
   rows: InspectRow[];
   isSprite: boolean;
+  isSpine: boolean;
+  isBmfont: boolean;
+  spineIndex: number;
+  bmfontIndex: number;
 }
 
 export interface NodeInspectorData {
@@ -198,7 +202,33 @@ const inspectComponent = (comp: unknown): ComponentInspectInfo => {
     rows.push({ label: 'type', value: typeName });
   }
 
-  return { typeName, shortName, enabled, rows, isSprite };
+  const isSpine =
+    /Spine|Skeleton/i.test(shortName) && !/Sprite|SkeletonData/i.test(shortName);
+  const isBmfont = (() => {
+    if (!/Label/i.test(shortName) || /RichText/i.test(shortName)) return false;
+    const font = (c.font ?? c._font) as
+      | { fntConfig?: unknown; _fntConfig?: unknown; __classname__?: string }
+      | null
+      | undefined;
+    if (!font) return false;
+    return !!(
+      font.fntConfig ||
+      font._fntConfig ||
+      /BitmapFont/i.test(font.__classname__ ?? '')
+    );
+  })();
+
+  return {
+    typeName,
+    shortName,
+    enabled,
+    rows,
+    isSprite,
+    isSpine,
+    isBmfont,
+    spineIndex: 0,
+    bmfontIndex: 0,
+  };
 };
 
 export function collectNodeInspectorData(
@@ -211,6 +241,18 @@ export function collectNodeInspectorData(
   if (!node) return null;
 
   const components = listComponents(node).map(inspectComponent);
+  let spineIdx = 0;
+  let bmfontIdx = 0;
+  for (const c of components) {
+    if (c.isSpine) {
+      c.spineIndex = spineIdx;
+      spineIdx += 1;
+    }
+    if (c.isBmfont) {
+      c.bmfontIndex = bmfontIdx;
+      bmfontIdx += 1;
+    }
+  }
 
   return {
     nodeId: getNodeId(node),
@@ -278,6 +320,16 @@ export function renderNodeInspectorHtml(data: NodeInspectorData | null): string 
       const stateBadge = comp.enabled
         ? '<span class="insp-badge insp-badge-on">启用</span>'
         : '<span class="insp-badge insp-badge-off">禁用</span>';
+      const exportBtns = [
+        comp.isSpine
+          ? `<button type="button" class="insp-export-spine-btn" data-spine-idx="${comp.spineIndex}" title="导出 Spine zip">导出 Spine</button>`
+          : '',
+        comp.isBmfont
+          ? `<button type="button" class="insp-export-bmfont-btn" data-bmfont-idx="${comp.bmfontIndex}" title="导出 BMFont zip">导出 BMFont</button>`
+          : '',
+      ]
+        .filter(Boolean)
+        .join('');
       const preview = comp.isSprite
         ? `<div class="insp-sprite-preview-2x" data-sprite-preview-2x>
             <div class="insp-sprite-preview-toolbar">
@@ -290,7 +342,7 @@ export function renderNodeInspectorHtml(data: NodeInspectorData | null): string 
       return `<section class="insp-comp-block">
         <header class="insp-comp-header">
           <span class="insp-comp-name">${escapeHtml(comp.shortName)}</span>
-          <span class="insp-comp-actions">${stateBadge}</span>
+          <span class="insp-comp-actions">${exportBtns}${stateBadge}</span>
         </header>
         <div class="insp-comp-body">${rows}${preview}</div>
       </section>`;

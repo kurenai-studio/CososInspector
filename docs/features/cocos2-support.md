@@ -1,6 +1,6 @@
 # Cocos Creator 2.x（含 2.4）支持
 
-> 状态：**P0–P3b 已落地**（节点树 / Inspector / 暂停 / Sprite / MCP 快照 / Creator 3.x 复刻含 Label·Widget·Spine 占位）。Spine 骨架资源绑定仍待做。
+> 状态：**P0–P4a 已落地**。P4a = 2.x 面板导出 Spine/BMFont zip（手动拖入 Creator 3.x）。自动绑定 SkeletonData/BitmapFont 仍待做。
 
 ## 能力矩阵
 
@@ -10,45 +10,28 @@
 | 全量节点树 + Active 切换 | ✓ | ✓ P0 |
 | 节点基础属性 Inspector | ✓ | ✓ P0 |
 | 暂停 / 继续 | ✓ | ✓ P0 |
-| Sprite 纹理预览 / PNG 下载（图集裁切+旋转还原） | ✓ | ✓ P1 |
+| Sprite 纹理预览 / PNG 下载 | ✓ | ✓ P1 |
 | MCP 桥接 / 场景快照 / 纹理下载 API | ✓ | ✓ P2（子集） |
-| 纹理替换 / 换皮包 / 节点画框 / 截图 | ✓ | ✗（返回明确错误） |
-| 场景复刻（层级/Transform/UI/Sprite） | ✓ | ✓ P3a |
-| 场景复刻 Label / Widget / Spine 占位 | ✓ P3b | ✓ P3b |
+| 场景复刻（层级/UI/Sprite/Label/Widget） | ✓ | ✓ P3a/b |
+| Spine / BMFont **zip 导出** | ✓ | ✓ P4a |
+| Spine / BMFont **自动绑入 Creator** | ✗ | ✗（手动 unpack） |
 
-## 代码入口
+## P4a：Spine / BMFont 导出
 
-- 统一检测：`src/engine/detect.ts`
-- 启动分流：`src/injected.ts` → `bootInspector()`
-- 2.x：`src/cocos2/`（含 `sceneSnapshot` / `mcpBridge`）
-- 复刻工具：`tools/mcp-cocos-inspector/scene-to-creator.mjs`
-
-## P3a 映射要点
-
-1. **path**：快照使用 ` › `；工具对旧 `/` 快照做归一  
-2. **sizeMode**：2.x → 快照内写 **3.x 枚举**  
-3. **spriteFrame**：补 `offset` / `originalSize`  
-4. **designResolution**：快照顶栏 + Canvas 组件行  
-5. **Camera**：无 Camera 时磁盘补丁可合成  
-
-## P3b 映射要点
-
-1. **Label**：`cc.Label` + string / fontSize / lineHeight / color / overflow（系统字体，不绑 BMFont/TTF 资源）  
-2. **Widget**：`cc.Widget` 对齐边与边距（由快照「左/右/上/下」行还原）  
-3. **Spine**：仅 `sp.Skeleton` 占位 + defaultAnimation 名；**不**导出/绑定 skeletonData  
+- 入口：`src/cocos2/spineExport.ts`、`bmfontExport.ts`（DOM 整图提取）
+- Inspector 组件头：`导出 Spine` / `导出 BMFont`
+- zip 布局与 3.x 一致；`manifest.engineFamily: '2'`
+- 迁入：`npm run unpack-spine` 或手动拖入 Creator 3.x assets 后 reimport
+- 注意：2.x 运行时 Spine 版本可能与 Creator 3.x 不一致，导入失败时用 Spine 编辑器重导
 
 复刻命令见 [scene-recovery.md](scene-recovery.md)。
 
-## 验收
+## 验收（P4a）
 
-### P3a
-1. 2.4 快照 `engineFamily === '2'`，path 含 ` › `  
-2. `cocos-scene-to-creator --clear --with-textures` 后主 Sprite 与尺寸基本正确  
+1. 2.4 试玩页选中带 Skeleton / BMFont Label 的节点  
+2. 点「导出 Spine」或「导出 BMFont」下载 zip  
+3. 解压后含 json|skel + atlas + 纹理（或 .fnt + png）  
 
-### P3b
-1. 快照中 Label 有「文本/字号」；Widget 有「左/右/上/下」  
-2. 重建结果含 `labelsAppliedCount` / `widgetsAppliedCount`；有 Spine 节点时 `spinesAppliedCount` > 0（组件存在即可，无贴图正常）  
+## 后续（P4b）
 
-## 后续
-
-Spine/BMFont 资源迁入、Widget 与动态布局精调、2.x originalCanvas 引擎对齐合成。
+scene-to-creator 自动导入并绑定 `skeletonData` / `Label.font`。

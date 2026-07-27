@@ -156,22 +156,12 @@ npm run cocos-scene-to-creator -- tmp/godeebxp-scene-snapshot.json `
 | D | Spine/Label/脚本组件占位 / TS 还原 | 待做 |
 | E | Creator 2.x 快照 → 3.x 复刻（P3a） | ✅ 路径/sizeMode/设计分辨率/Camera |
 | F | Label / Widget / Spine 占位（P3b） | ✅ 文本与对齐可还原；Spine 无骨架资源 |
+| G | 2.x Spine/BMFont zip 导出（P4a） | ✅ 面板导出；手动拖入 Creator |
 
-## Creator 2.x → 3.x（P3a）
+### P4a（Spine / BMFont 导出）
 
-试玩页为 **Creator 2.4** 时，扩展导出 `engineFamily: '2'` 的快照（字段对齐 3.x）。`scene-to-creator.mjs` 与磁盘补丁：
-
-- path 分隔符 ` › `（旧 `/` 快照工具侧归一）
-- `spriteFrame.sizeMode` 已映射为 **3.x 枚举**
-- 顶栏 `designResolution` 优先；无 Camera 时补丁可合成 Camera 节点
-
-### P3b（Label / Widget / Spine）
-
-重建脚本对每个节点额外：
-
-- `cc.Label`：string / fontSize / lineHeight / color / overflow  
-- `cc.Widget`：四边对齐与边距  
-- `sp.Skeleton`：组件占位 + `defaultAnimation`（不绑 skeletonData）  
+2.x Inspector 可导出与 3.x 同布局的 zip（`src/cocos2/spineExport.ts` / `bmfontExport.ts`）。  
+**不**自动写入 Creator；用 `npm run unpack-spine` 或拖入 assets。
 
 详见 [cocos2-support.md](cocos2-support.md)。
 
@@ -179,8 +169,8 @@ npm run cocos-scene-to-creator -- tmp/godeebxp-scene-snapshot.json `
 
 - `src/cocos3/shareUpload.ts` — 试玩页 HTTP PUT 写入共享 out/
 - `src/cocos3/spriteDownload.ts` — trim 精灵 PNG 导出（`originalCanvas` / `frame` / `scale`）
-- `src/cocos3/spineExport.ts` — Spine 资源导出（骨架 + atlas + 多页纹理 zip）
-- `src/cocos3/bmfontExport.ts` — BMFont 资源导出（重建 `.fnt` + 图集 png + `fntConfig.json` 兜底 zip）
+- `src/cocos3/spineExport.ts` / `src/cocos2/spineExport.ts` — Spine 资源导出
+- `src/cocos3/bmfontExport.ts` / `src/cocos2/bmfontExport.ts` — BMFont 资源导出
 - `src/cocos3/sceneSnapshot.ts` / `src/cocos2/sceneSnapshot.ts` — 快照采集
 - `src/cocos3/mcpBridge.ts` / `src/cocos2/mcpBridge.ts` — 页面 API
 - `tools/mcp-cocos-inspector/index.mjs` — MCP 工具

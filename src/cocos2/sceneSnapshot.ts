@@ -182,9 +182,9 @@ const buildNodeSnapshot = (
       rows: c.rows,
       flags: {
         isSprite: c.isSprite,
-        isSpine: /Spine|Skeleton/i.test(c.typeName),
+        isSpine: c.isSpine,
         isCustom: !c.typeName.startsWith('cc.'),
-        spineIndex: 0,
+        spineIndex: c.spineIndex,
       },
     })
   );

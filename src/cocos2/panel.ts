@@ -25,6 +25,8 @@ import {
   extractSpriteFrame,
   type Cc2SpriteExtractResult,
 } from './spriteExtract';
+import { downloadSpineExport } from './spineExport';
+import { downloadBmfontExport } from './bmfontExport';
 import { installMcpBridge } from './mcpBridge';
 
 declare const __INSPECTOR_VERSION__: string;
@@ -60,11 +62,12 @@ export class CocosInspector2 {
   private init(): void {
     this.createUI();
     this.bindTreeEvents();
+    this.bindInspectorEvents();
     installMcpBridge();
     this.refreshAll(true);
     this.startAutoRefresh();
     window.postMessage({ type: 'cocos-inspector-ready', engineFamily: '2' }, '*');
-    logEngine('已启动 2.x 面板（节点树 + Inspector + 暂停 + MCP P2）');
+    logEngine('已启动 2.x 面板（含 Spine/BMFont 导出）');
   }
 
   private createUI(): void {
@@ -234,6 +237,55 @@ export class CocosInspector2 {
       window.clearInterval(this.updateTimer);
       this.updateTimer = null;
     }
+  }
+
+  private bindInspectorEvents(): void {
+    this.nodeInspectorContainer?.addEventListener('click', (event: Event) => {
+      const target = event.target as HTMLElement;
+
+      const spineBtn = target.closest(
+        '.insp-export-spine-btn'
+      ) as HTMLButtonElement | null;
+      if (spineBtn) {
+        event.stopPropagation();
+        if (!this.selectedId) return;
+        const idx = Number(spineBtn.dataset.spineIdx ?? '0');
+        void this.exportSpine(idx);
+        return;
+      }
+
+      const bmfontBtn = target.closest(
+        '.insp-export-bmfont-btn'
+      ) as HTMLButtonElement | null;
+      if (bmfontBtn) {
+        event.stopPropagation();
+        if (!this.selectedId) return;
+        const idx = Number(bmfontBtn.dataset.bmfontIdx ?? '0');
+        void this.exportBmfont(idx);
+      }
+    });
+  }
+
+  private async exportSpine(spineIndex: number): Promise<void> {
+    if (!this.selectedId) return;
+    this.setStatus('正在导出 Spine…');
+    const result = await downloadSpineExport(this.selectedId, spineIndex);
+    if (!result.ok) {
+      this.setStatus(`Spine 导出失败: ${result.error ?? '未知错误'}`);
+      return;
+    }
+    this.setStatus(`已下载 ${result.zipName}（${result.files.length} 文件）`);
+  }
+
+  private async exportBmfont(bmfontIndex: number): Promise<void> {
+    if (!this.selectedId) return;
+    this.setStatus('正在导出 BMFont…');
+    const result = await downloadBmfontExport(this.selectedId, bmfontIndex);
+    if (!result.ok) {
+      this.setStatus(`BMFont 导出失败: ${result.error ?? '未知错误'}`);
+      return;
+    }
+    this.setStatus(`已下载 ${result.zipName}（${result.files.length} 文件）`);
   }
 
   private bindTreeEvents(): void {
