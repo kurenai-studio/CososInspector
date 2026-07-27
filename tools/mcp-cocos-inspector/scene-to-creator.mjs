@@ -808,17 +808,57 @@ function parseWidgetFromNode(ch) {
   };
 }
 
-function parseSpineFromNode(ch) {
-  const sp = (ch.components || []).find(
-    (c) =>
+function parseSpineCompsFromNode(ch) {
+  const list = [];
+  let localIdx = 0;
+  for (const c of ch.components || []) {
+    const isSp =
       c.flags?.isSpine ||
-      (/Spine|Skeleton/.test(c.typeName || '') && !/Sprite/.test(c.typeName || ''))
+      (/Spine|Skeleton/.test(c.typeName || '') &&
+        !/Sprite/.test(c.typeName || ''));
+    if (!isSp) continue;
+    const spineIndex =
+      typeof c.flags?.spineIndex === 'number' && c.flags.spineIndex >= 0
+        ? c.flags.spineIndex
+        : localIdx;
+    const animRow = findRow(c.rows || [], [
+      '动画',
+      'animation',
+      'defaultAnimation',
+    ]);
+    list.push({
+      spineIndex,
+      animation:
+        animRow?.value && animRow.value !== '-' ? String(animRow.value) : '',
+    });
+    localIdx += 1;
+  }
+  return list;
+}
+
+function parseSpineFromNode(ch) {
+  return parseSpineCompsFromNode(ch)[0] || null;
+}
+
+function lookupManifestEntry(manifest, nodeId, index = 0) {
+  return (
+    manifest[`${nodeId}#${index}`] ??
+    (index === 0 ? manifest[nodeId] : null) ??
+    null
   );
-  if (!sp) return null;
-  const animRow = findRow(sp.rows || [], ['动画', 'animation', 'defaultAnimation']);
-  return {
-    animation: animRow?.value && animRow.value !== '-' ? String(animRow.value) : '',
-  };
+}
+
+async function ensureComponentCount(nodeUuid, component, count) {
+  if (count <= 0) return;
+  await ensureComponent(nodeUuid, component);
+  for (let i = 1; i < count; i += 1) {
+    try {
+      await Editor.Message.request('scene', 'create-component', {
+        uuid: nodeUuid,
+        component,
+      });
+    } catch (_) {}
+  }
 }
 
 async function applyLabel(nodeUuid, ch) {
@@ -871,7 +911,7 @@ async function applyLabel(nodeUuid, ch) {
       });
     } catch (_) {}
   }
-  const fontEntry = bmfontManifest[ch.id];
+  const fontEntry = lookupManifestEntry(bmfontManifest, ch.id, 0);
   if (fontEntry?.dbUrl) {
     try {
       const fontUuid = await resolveAssetUuid(fontEntry.dbUrl);
@@ -880,7 +920,30 @@ async function applyLabel(nodeUuid, ch) {
         path: 'cc.Label.font',
         dump: { type: 'cc.BitmapFont', value: { uuid: fontUuid } },
       });
-      labelFontBindings.push({ nodeUuid, fontUuid, path: ch.path || ch.name });
+      labelFontBindings.push({
+        nodeUuid,
+        fontUuid,
+        bmfontIndex: 0,
+        path: ch.path || ch.name,
+      });
+    } catch (_) {}
+  }
+  // 同节点额外 BMFont Label（index>0）仅记绑定，交磁盘补丁
+  for (const c of ch.components || []) {
+    if (!c.flags?.isBmfont) continue;
+    const idx = c.flags.bmfontIndex ?? 0;
+    if (idx === 0) continue;
+    const extra = lookupManifestEntry(bmfontManifest, ch.id, idx);
+    if (!extra?.dbUrl) continue;
+    try {
+      const fontUuid = await resolveAssetUuid(extra.dbUrl);
+      await ensureComponentCount(nodeUuid, 'cc.Label', idx + 1);
+      labelFontBindings.push({
+        nodeUuid,
+        fontUuid,
+        bmfontIndex: idx,
+        path: ch.path || ch.name,
+      });
     } catch (_) {}
   }
   return true;
@@ -922,33 +985,47 @@ async function applyWidget(nodeUuid, ch) {
 }
 
 async function applySpinePlaceholder(nodeUuid, ch) {
-  const sp = parseSpineFromNode(ch);
-  if (!sp && !spineManifest[ch.id]) return false;
-  try {
-    await ensureComponent(nodeUuid, 'sp.Skeleton');
-  } catch (_) {
-    return false;
-  }
-  const entry = spineManifest[ch.id];
-  if (entry?.dbUrl) {
-    try {
-      const skelUuid = await resolveAssetUuid(entry.dbUrl);
-      await Editor.Message.request('scene', 'set-property', {
-        uuid: nodeUuid,
-        path: 'sp.Skeleton.skeletonData',
-        dump: { type: 'sp.SkeletonData', value: { uuid: skelUuid } },
-      });
-      spineBindings.push({ nodeUuid, skelUuid, path: ch.path || ch.name });
-    } catch (_) {}
-  }
-  if (sp?.animation) {
-    try {
-      await Editor.Message.request('scene', 'set-property', {
-        uuid: nodeUuid,
-        path: 'sp.Skeleton.defaultAnimation',
-        dump: { value: sp.animation },
-      });
-    } catch (_) {}
+  const comps = parseSpineCompsFromNode(ch);
+  const hasManifest0 = !!lookupManifestEntry(spineManifest, ch.id, 0);
+  if (!comps.length && !hasManifest0) return false;
+
+  const work = comps.length
+    ? comps
+    : [{ spineIndex: 0, animation: '' }];
+  const maxNeeded = Math.max(...work.map((c) => c.spineIndex)) + 1;
+  await ensureComponentCount(nodeUuid, 'sp.Skeleton', maxNeeded);
+
+  for (const item of work) {
+    const entry = lookupManifestEntry(spineManifest, ch.id, item.spineIndex);
+    if (entry?.dbUrl) {
+      try {
+        const skelUuid = await resolveAssetUuid(entry.dbUrl);
+        if (item.spineIndex === 0) {
+          try {
+            await Editor.Message.request('scene', 'set-property', {
+              uuid: nodeUuid,
+              path: 'sp.Skeleton.skeletonData',
+              dump: { type: 'sp.SkeletonData', value: { uuid: skelUuid } },
+            });
+          } catch (_) {}
+        }
+        spineBindings.push({
+          nodeUuid,
+          skelUuid,
+          spineIndex: item.spineIndex,
+          path: ch.path || ch.name,
+        });
+      } catch (_) {}
+    }
+    if (item.animation && item.spineIndex === 0) {
+      try {
+        await Editor.Message.request('scene', 'set-property', {
+          uuid: nodeUuid,
+          path: 'sp.Skeleton.defaultAnimation',
+          dump: { value: item.animation },
+        });
+      } catch (_) {}
+    }
   }
   return true;
 }
@@ -1411,24 +1488,44 @@ const main = async () => {
       })();
     }
     const pathMapOnce = buildPathToNodeUuidMap(disk.abs);
+    const uniqSpine = new Map();
+    for (const e of Object.values(spineBm.spineManifest)) {
+      const idx = e.spineIndex ?? e.index ?? 0;
+      const k = `${e.nodePath || e.nodeId}#${idx}`;
+      if (!uniqSpine.has(k)) uniqSpine.set(k, e);
+    }
+    const uniqFont = new Map();
+    for (const e of Object.values(spineBm.bmfontManifest)) {
+      const idx = e.bmfontIndex ?? e.index ?? 0;
+      const k = `${e.nodePath || e.nodeId}#${idx}`;
+      if (!uniqFont.has(k)) uniqFont.set(k, e);
+    }
     const spineBind =
       result.spineBindings?.length > 0
         ? result.spineBindings
-        : Object.values(spineBm.spineManifest)
+        : [...uniqSpine.values()]
             .map((e) => {
               const nodeUuid = lookupPathMap(pathMapOnce, e.nodePath);
               if (!nodeUuid || !e.skelUuid) return null;
-              return { nodeUuid, skelUuid: e.skelUuid };
+              return {
+                nodeUuid,
+                skelUuid: e.skelUuid,
+                spineIndex: e.spineIndex ?? e.index ?? 0,
+              };
             })
             .filter(Boolean);
     const fontBind =
       result.labelFontBindings?.length > 0
         ? result.labelFontBindings
-        : Object.values(spineBm.bmfontManifest)
+        : [...uniqFont.values()]
             .map((e) => {
               const nodeUuid = lookupPathMap(pathMapOnce, e.nodePath);
               if (!nodeUuid || !e.fontUuid) return null;
-              return { nodeUuid, fontUuid: e.fontUuid };
+              return {
+                nodeUuid,
+                fontUuid: e.fontUuid,
+                bmfontIndex: e.bmfontIndex ?? e.index ?? 0,
+              };
             })
             .filter(Boolean);
     const skPatch = patchSkeletonDataOnDisk(disk.abs, spineBind);

@@ -235,7 +235,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'cocos_list_spines',
-      description: '列出场景中 Spine（sp.Skeleton）节点：id/name/path/skeletonName',
+      description: '列出场景中 Spine 组件（同节点多组件拆成多条，含 spineIndex）',
       inputSchema: {
         type: 'object',
         properties: {
@@ -248,7 +248,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'cocos_list_bmfonts',
-      description: '列出使用 BMFont 的 Label 节点：id/name/path/fontName',
+      description: '列出 BMFont Label（同节点多组件拆成多条，含 bmfontIndex）',
       inputSchema: {
         type: 'object',
         properties: {

@@ -392,12 +392,14 @@ export interface SpineListItem {
   id: string;
   name: string;
   path: string;
+  /** 同节点上第几个 Spine 组件（0-based） */
+  spineIndex: number;
   skeletonName: string;
   animation: string;
   searchText: string;
 }
 
-/** 扁平收集场景中所有 Spine 节点 */
+/** 扁平收集场景中所有 Spine 组件（同节点多组件会拆成多条） */
 export const collectSpineList = (scene: cc.Node): SpineListItem[] => {
   const items: SpineListItem[] = [];
   const walk = (node: cc.Node): void => {
@@ -405,22 +407,27 @@ export const collectSpineList = (scene: cc.Node): SpineListItem[] => {
     if (spines.length > 0) {
       const id = getNodeId(node);
       const path = buildNodePath(scene, id);
-      const comp = spines[0] as Record<string, unknown>;
-      const data = (comp.skeletonData ?? comp._skeletonData) as
-        | { name?: string; _name?: string }
-        | null
-        | undefined;
-      const skeletonName = String(data?.name ?? data?._name ?? '');
-      const animation = String(
-        comp.animation ?? comp.defaultAnimation ?? ''
-      );
-      items.push({
-        id,
-        name: node.name || '(unnamed)',
-        path,
-        skeletonName,
-        animation,
-        searchText: `${node.name} ${path} ${skeletonName}`.toLowerCase(),
+      const name = node.name || '(unnamed)';
+      spines.forEach((raw, spineIndex) => {
+        const comp = raw as Record<string, unknown>;
+        const data = (comp.skeletonData ?? comp._skeletonData) as
+          | { name?: string; _name?: string }
+          | null
+          | undefined;
+        const skeletonName = String(data?.name ?? data?._name ?? '');
+        const animation = String(
+          comp.animation ?? comp.defaultAnimation ?? ''
+        );
+        items.push({
+          id,
+          name,
+          path,
+          spineIndex,
+          skeletonName,
+          animation,
+          searchText:
+            `${name} ${path} ${skeletonName} #${spineIndex}`.toLowerCase(),
+        });
       });
     }
     const children = [...(node.children ?? [])]

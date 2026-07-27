@@ -1,6 +1,6 @@
 /**
  * scene-to-creator：从试玩页导出 Spine/BMFont zip → 解压到 recovered → 生成 manifest
- * 按 path 匹配 live 节点 ID（避免快照 id 漂移）
+ * 按 path + index / skeletonName|fontName 匹配 live 节点（支持同节点多组件）
  */
 import fs from 'fs';
 import path from 'path';
@@ -8,26 +8,63 @@ import { unpackExportZip } from './unpack-export-zip.mjs';
 import { resolveSharePath } from './shared-fs.mjs';
 import { normalizeScenePath } from './scene-snapshot-parse.mjs';
 
-const collectSpineNodes = (node, out = []) => {
-  const isSpine = (node.components || []).some(
-    (c) =>
-      c.flags?.isSpine ||
-      (/Spine|Skeleton/.test(c.typeName || '') && !/Sprite|SkeletonData/.test(c.typeName || ''))
+const isSpineComp = (c) =>
+  c.flags?.isSpine ||
+  (/Spine|Skeleton/.test(c.typeName || '') &&
+    !/Sprite|SkeletonData/.test(c.typeName || ''));
+
+const isBmfontComp = (c) => {
+  if (c.flags?.isBmfont) return true;
+  // 旧快照无 isBmfont：仅 Label，交给 live 过滤；此处仍收集供回退
+  return (
+    /Label/.test(c.typeName || '') && !/RichText/.test(c.typeName || '')
   );
-  if (isSpine) out.push({ id: node.id, name: node.name, path: node.path });
-  for (const ch of node.children ?? []) collectSpineNodes(ch, out);
+};
+
+/** 快照按组件展开（含 spineIndex / bmfontIndex） */
+const collectSpineJobs = (node, out = []) => {
+  let localIdx = 0;
+  for (const c of node.components || []) {
+    if (!isSpineComp(c)) continue;
+    const spineIndex =
+      typeof c.flags?.spineIndex === 'number' && c.flags.spineIndex >= 0
+        ? c.flags.spineIndex
+        : localIdx;
+    out.push({
+      id: node.id,
+      name: node.name,
+      path: node.path,
+      spineIndex,
+    });
+    localIdx += 1;
+  }
+  for (const ch of node.children ?? []) collectSpineJobs(ch, out);
   return out;
 };
 
-const collectBmfontNodes = (node, out = []) => {
-  const isBm = (node.components || []).some((c) => {
-    if (!/Label/.test(c.typeName || '') || /RichText/.test(c.typeName || '')) {
-      return false;
+const collectBmfontJobs = (node, out = []) => {
+  const comps = node.components || [];
+  const hasBmflag = comps.some((c) => c.flags && 'isBmfont' in c.flags);
+  let localIdx = 0;
+  for (const c of comps) {
+    if (hasBmflag) {
+      if (!c.flags?.isBmfont) continue;
+    } else if (!isBmfontComp(c)) {
+      continue;
     }
-    return true;
-  });
-  if (isBm) out.push({ id: node.id, name: node.name, path: node.path });
-  for (const ch of node.children ?? []) collectBmfontNodes(ch, out);
+    const bmfontIndex =
+      typeof c.flags?.bmfontIndex === 'number' && c.flags.bmfontIndex >= 0
+        ? c.flags.bmfontIndex
+        : localIdx;
+    out.push({
+      id: node.id,
+      name: node.name,
+      path: node.path,
+      bmfontIndex,
+    });
+    localIdx += 1;
+  }
+  for (const ch of node.children ?? []) collectBmfontJobs(ch, out);
   return out;
 };
 
@@ -42,17 +79,22 @@ const readMetaUuid = (absPath) => {
   }
 };
 
-const buildLivePathMap = (liveList = []) => {
+const buildLivePathMap = (liveList = [], indexKey) => {
   const map = new Map();
   for (const sp of liveList) {
     const norm = normalizeScenePath(sp.path);
+    const idx = sp[indexKey] ?? 0;
+    const nameKey = sp.skeletonName || sp.fontName || '';
     const keys = [
-      norm,
-      sp.path,
-      norm && sp.skeletonName ? `${norm}@@${sp.skeletonName}` : null,
-      norm && sp.fontName ? `${norm}@@${sp.fontName}` : null,
-      sp.name && sp.skeletonName ? `${sp.name}@@${sp.skeletonName}` : null,
-      sp.name && sp.fontName ? `${sp.name}@@${sp.fontName}` : null,
+      `${norm}#${idx}`,
+      sp.path ? `${sp.path}#${idx}` : null,
+      norm && nameKey ? `${norm}@@${nameKey}` : null,
+      sp.path && nameKey ? `${sp.path}@@${nameKey}` : null,
+      // index 0 保留裸 path，兼容旧匹配
+      idx === 0 ? norm : null,
+      idx === 0 ? sp.path : null,
+      sp.name && nameKey ? `${sp.name}@@${nameKey}` : null,
+      idx === 0 ? sp.name : null,
     ].filter(Boolean);
     for (const key of keys) {
       if (!map.has(key)) map.set(key, sp);
@@ -61,13 +103,30 @@ const buildLivePathMap = (liveList = []) => {
   return map;
 };
 
-const resolveLiveId = (snapNode, liveByPath) => {
-  const pathKey = normalizeScenePath(snapNode.path);
-  const hit =
-    liveByPath.get(pathKey) ??
-    liveByPath.get(snapNode.path) ??
-    liveByPath.get(snapNode.name);
-  return hit?.id ?? snapNode.id;
+const resolveLiveEntry = (snapJob, liveByPath, indexKey, nameField) => {
+  const pathKey = normalizeScenePath(snapJob.path);
+  const idx = snapJob[indexKey] ?? 0;
+  const nameVal = snapJob[nameField] || '';
+  return (
+    liveByPath.get(`${pathKey}#${idx}`) ??
+    liveByPath.get(`${snapJob.path}#${idx}`) ??
+    (nameVal
+      ? liveByPath.get(`${pathKey}@@${nameVal}`) ??
+        liveByPath.get(`${snapJob.path}@@${nameVal}`)
+      : null) ??
+    (idx === 0
+      ? liveByPath.get(pathKey) ??
+        liveByPath.get(snapJob.path) ??
+        liveByPath.get(snapJob.name)
+      : null) ??
+    null
+  );
+};
+
+const putManifest = (manifest, nodeId, index, entry) => {
+  const keyed = { ...entry, nodeId, index };
+  manifest[`${nodeId}#${index}`] = keyed;
+  if (index === 0) manifest[nodeId] = keyed;
 };
 
 /**
@@ -82,8 +141,14 @@ export const exportSpineBmfontAssets = async (snapshot, args, inspectorCall) => 
   fs.mkdirSync(spineRoot, { recursive: true });
   fs.mkdirSync(bmfontRoot, { recursive: true });
 
-  const spineNodes = collectSpineNodes(snapshot.root).slice(0, args.maxSpines ?? 50);
-  const labelNodes = collectBmfontNodes(snapshot.root).slice(0, args.maxBmfonts ?? 50);
+  const spineJobs = collectSpineJobs(snapshot.root).slice(
+    0,
+    args.maxSpines ?? 50
+  );
+  const bmfontJobs = collectBmfontJobs(snapshot.root).slice(
+    0,
+    args.maxBmfonts ?? 50
+  );
 
   const spineManifest = {};
   const bmfontManifest = {};
@@ -119,30 +184,44 @@ export const exportSpineBmfontAssets = async (snapshot, args, inspectorCall) => 
   }
 
   const liveSpineByPath = buildLivePathMap(
-    Array.isArray(liveSpines) ? liveSpines : []
+    Array.isArray(liveSpines) ? liveSpines : [],
+    'spineIndex'
   );
   const liveBmByPath = buildLivePathMap(
-    Array.isArray(liveBmfonts) ? liveBmfonts : []
+    Array.isArray(liveBmfonts) ? liveBmfonts : [],
+    'bmfontIndex'
   );
 
   console.error(
-    `[scene-to-creator] Spine 快照 ${spineNodes.length} / live ${liveSpineByPath.size}` +
-      ` · BMFont 候选 ${labelNodes.length} / live ${liveBmByPath.size}`
+    `[scene-to-creator] Spine 任务 ${spineJobs.length} / live ${
+      Array.isArray(liveSpines) ? liveSpines.length : 0
+    }` +
+      ` · BMFont 任务 ${bmfontJobs.length} / live ${
+        Array.isArray(liveBmfonts) ? liveBmfonts.length : 0
+      }`
   );
 
-  for (const sp of spineNodes) {
-    const liveId = resolveLiveId(sp, liveSpineByPath);
+  for (const job of spineJobs) {
+    const live = resolveLiveEntry(
+      job,
+      liveSpineByPath,
+      'spineIndex',
+      'skeletonName'
+    );
+    const liveId = live?.id ?? job.id;
+    const spineIndex = job.spineIndex ?? live?.spineIndex ?? 0;
     try {
       const dl = await inspectorCall(
         args.wsPort,
         'downloadSpine',
-        [liveId, { delivery: 'share', wsPort: args.wsPort, spineIndex: 0 }],
+        [liveId, { delivery: 'share', wsPort: args.wsPort, spineIndex }],
         { pageUrlMatch: args.pageUrlMatch, timeoutMs: 300_000 }
       );
       if (!dl?.ok) {
         spineFail += 1;
         console.error(
-          `[scene-to-creator] Spine 失败 ${sp.path} live=${liveId}: ${dl?.error ?? 'unknown'}`
+          `[scene-to-creator] Spine 失败 ${job.path}#${spineIndex} ` +
+            `live=${liveId}: ${dl?.error ?? 'unknown'}`
         );
         continue;
       }
@@ -157,7 +236,9 @@ export const exportSpineBmfontAssets = async (snapshot, args, inspectorCall) => 
         } else {
           throw new Error('downloadSpine 无 sharePath/base64');
         }
-        const baseName = path.basename(dl.zipName, '.zip').replace(/_spine$/i, '');
+        const baseName = path
+          .basename(dl.zipName, '.zip')
+          .replace(/_spine$/i, '');
         const destDir = path.join(spineRoot, baseName);
         const unpacked = await unpackExportZip(fs.readFileSync(zipAbs), destDir);
         const primary = unpacked.primaryAsset;
@@ -176,29 +257,38 @@ export const exportSpineBmfontAssets = async (snapshot, args, inspectorCall) => 
         console.error(`[scene-to-creator] Spine 解压 ${baseName} → ${rel}`);
       }
 
-      spineManifest[sp.id] = {
+      putManifest(spineManifest, job.id, spineIndex, {
         ...entry,
-        nodeId: sp.id,
         liveId,
-        nodePath: normalizeScenePath(sp.path),
-        nodeName: sp.name,
-      };
+        spineIndex,
+        nodePath: normalizeScenePath(job.path),
+        nodeName: job.name,
+      });
       spineOk += 1;
     } catch (e) {
       spineFail += 1;
       console.error(
-        `[scene-to-creator] Spine 异常 ${sp.path}: ${e instanceof Error ? e.message : e}`
+        `[scene-to-creator] Spine 异常 ${job.path}#${spineIndex}: ${
+          e instanceof Error ? e.message : e
+        }`
       );
     }
   }
 
-  for (const lab of labelNodes) {
-    const liveId = resolveLiveId(lab, liveBmByPath);
+  for (const job of bmfontJobs) {
+    const live = resolveLiveEntry(
+      job,
+      liveBmByPath,
+      'bmfontIndex',
+      'fontName'
+    );
+    const liveId = live?.id ?? job.id;
+    const bmfontIndex = job.bmfontIndex ?? live?.bmfontIndex ?? 0;
     try {
       const dl = await inspectorCall(
         args.wsPort,
         'downloadBmfont',
-        [liveId, { delivery: 'share', wsPort: args.wsPort, bmfontIndex: 0 }],
+        [liveId, { delivery: 'share', wsPort: args.wsPort, bmfontIndex }],
         { pageUrlMatch: args.pageUrlMatch, timeoutMs: 180_000 }
       );
       if (!dl?.ok) {
@@ -215,7 +305,9 @@ export const exportSpineBmfontAssets = async (snapshot, args, inspectorCall) => 
         } else {
           throw new Error('downloadBmfont 无 sharePath/base64');
         }
-        const baseName = path.basename(dl.zipName, '.zip').replace(/_bmfont$/i, '');
+        const baseName = path
+          .basename(dl.zipName, '.zip')
+          .replace(/_bmfont$/i, '');
         const destDir = path.join(bmfontRoot, baseName);
         const unpacked = await unpackExportZip(fs.readFileSync(zipAbs), destDir);
         const primary = unpacked.primaryAsset;
@@ -234,18 +326,20 @@ export const exportSpineBmfontAssets = async (snapshot, args, inspectorCall) => 
         console.error(`[scene-to-creator] BMFont 解压 ${baseName} → ${rel}`);
       }
 
-      bmfontManifest[lab.id] = {
+      putManifest(bmfontManifest, job.id, bmfontIndex, {
         ...entry,
-        nodeId: lab.id,
         liveId,
-        nodePath: normalizeScenePath(lab.path),
-        nodeName: lab.name,
-      };
+        bmfontIndex,
+        nodePath: normalizeScenePath(job.path),
+        nodeName: job.name,
+      });
       bmOk += 1;
     } catch (e) {
       bmFail += 1;
       console.error(
-        `[scene-to-creator] BMFont 异常 ${lab.path}: ${e instanceof Error ? e.message : e}`
+        `[scene-to-creator] BMFont 异常 ${job.path}#${bmfontIndex}: ${
+          e instanceof Error ? e.message : e
+        }`
       );
     }
   }

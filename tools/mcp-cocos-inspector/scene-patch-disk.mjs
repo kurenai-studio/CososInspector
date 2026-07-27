@@ -71,7 +71,7 @@ export function patchSpriteFramesOnDisk(sceneAbs, bindings) {
   return { patched, sizeModePatched };
 }
 
-/** 磁盘写入 sp.Skeleton.skeletonData */
+/** 磁盘写入 sp.Skeleton.skeletonData（按 spineIndex 绑第 N 个） */
 export function patchSkeletonDataOnDisk(sceneAbs, bindings) {
   if (!bindings?.length) return { patched: 0 };
   const scene = JSON.parse(fs.readFileSync(sceneAbs, 'utf8'));
@@ -85,19 +85,22 @@ export function patchSkeletonDataOnDisk(sceneAbs, bindings) {
     if (!b.skelUuid) continue;
     const node = nodeByUuid.get(b.nodeUuid);
     if (!node?._components) continue;
+    const skeletons = [];
     for (const cref of node._components) {
       const comp = byId.get(cref.__id__);
-      if (comp?.__type__ === 'sp.Skeleton') {
-        comp._skeletonData = skeletonDataRef(b.skelUuid);
-        patched += 1;
-      }
+      if (comp?.__type__ === 'sp.Skeleton') skeletons.push(comp);
     }
+    const idx = Number.isFinite(b.spineIndex) ? b.spineIndex : 0;
+    const target = skeletons[idx] ?? (idx === 0 ? skeletons[0] : null);
+    if (!target) continue;
+    target._skeletonData = skeletonDataRef(b.skelUuid);
+    patched += 1;
   }
   fs.writeFileSync(sceneAbs, `${JSON.stringify(scene, null, 2)}\n`, 'utf8');
   return { patched };
 }
 
-/** 磁盘写入 cc.Label.font（BitmapFont） */
+/** 磁盘写入 cc.Label.font（按 bmfontIndex 绑第 N 个 Label） */
 export function patchBitmapFontOnDisk(sceneAbs, bindings) {
   if (!bindings?.length) return { patched: 0 };
   const scene = JSON.parse(fs.readFileSync(sceneAbs, 'utf8'));
@@ -111,13 +114,16 @@ export function patchBitmapFontOnDisk(sceneAbs, bindings) {
     if (!b.fontUuid) continue;
     const node = nodeByUuid.get(b.nodeUuid);
     if (!node?._components) continue;
+    const labels = [];
     for (const cref of node._components) {
       const comp = byId.get(cref.__id__);
-      if (comp?.__type__ === 'cc.Label') {
-        comp._font = bitmapFontRef(b.fontUuid);
-        patched += 1;
-      }
+      if (comp?.__type__ === 'cc.Label') labels.push(comp);
     }
+    const idx = Number.isFinite(b.bmfontIndex) ? b.bmfontIndex : 0;
+    const target = labels[idx] ?? (idx === 0 ? labels[0] : null);
+    if (!target) continue;
+    target._font = bitmapFontRef(b.fontUuid);
+    patched += 1;
   }
   fs.writeFileSync(sceneAbs, `${JSON.stringify(scene, null, 2)}\n`, 'utf8');
   return { patched };

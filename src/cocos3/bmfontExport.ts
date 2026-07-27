@@ -379,11 +379,13 @@ export interface BmfontListItem {
   id: string;
   name: string;
   path: string;
+  /** 同节点上第几个 BMFont Label（0-based） */
+  bmfontIndex: number;
   fontName: string;
   searchText: string;
 }
 
-/** 扁平收集使用 BMFont 的 Label 节点 */
+/** 扁平收集 BMFont Label（同节点多组件会拆成多条） */
 export const collectBmfontList = (scene: cc.Node): BmfontListItem[] => {
   const items: BmfontListItem[] = [];
   const walk = (node: cc.Node): void => {
@@ -391,14 +393,19 @@ export const collectBmfontList = (scene: cc.Node): BmfontListItem[] => {
     if (labels.length > 0) {
       const id = getNodeId(node);
       const path = buildNodePath(scene, id);
-      const font = getLabelFont(labels[0]!);
-      const fontName = String(font?.name ?? font?._name ?? '');
-      items.push({
-        id,
-        name: node.name || '(unnamed)',
-        path,
-        fontName,
-        searchText: `${node.name} ${path} ${fontName}`.toLowerCase(),
+      const name = node.name || '(unnamed)';
+      labels.forEach((lab, bmfontIndex) => {
+        const font = getLabelFont(lab);
+        const fontName = String(font?.name ?? font?._name ?? '');
+        items.push({
+          id,
+          name,
+          path,
+          bmfontIndex,
+          fontName,
+          searchText:
+            `${name} ${path} ${fontName} #${bmfontIndex}`.toLowerCase(),
+        });
       });
     }
     const children = [...(node.children ?? [])]

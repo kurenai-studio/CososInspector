@@ -27,8 +27,10 @@ export interface SceneComponentSnapshot {
   flags: {
     isSprite: boolean;
     isSpine: boolean;
+    isBmfont?: boolean;
     isCustom: boolean;
     spineIndex: number;
+    bmfontIndex?: number;
   };
 }
 
@@ -199,8 +201,10 @@ const buildNodeSnapshot = (
       flags: {
         isSprite: c.isSprite,
         isSpine: c.isSpine,
+        isBmfont: c.isBmfont,
         isCustom: c.isCustom,
         spineIndex: c.spineIndex,
+        bmfontIndex: c.bmfontIndex,
       },
     })
   );

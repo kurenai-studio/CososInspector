@@ -361,6 +361,8 @@ export interface BmfontListItem {
   id: string;
   name: string;
   path: string;
+  /** 同节点上第几个 BMFont Label（0-based） */
+  bmfontIndex: number;
   fontName: string;
   searchText: string;
 }
@@ -372,15 +374,19 @@ export const collectBmfontList = (scene: Cc2Node): BmfontListItem[] => {
     if (labels.length > 0) {
       const id = getNodeId(node);
       const path = buildNodePath(scene, id);
-      const font = getLabelFont(labels[0]!);
-      const fontName = String(font?.name ?? font?._name ?? '');
       const name = getNodeName(node);
-      items.push({
-        id,
-        name,
-        path,
-        fontName,
-        searchText: `${name} ${path} ${fontName}`.toLowerCase(),
+      labels.forEach((lab, bmfontIndex) => {
+        const font = getLabelFont(lab);
+        const fontName = String(font?.name ?? font?._name ?? '');
+        items.push({
+          id,
+          name,
+          path,
+          bmfontIndex,
+          fontName,
+          searchText:
+            `${name} ${path} ${fontName} #${bmfontIndex}`.toLowerCase(),
+        });
       });
     }
     for (const child of [...getNodeChildren(node)].sort((a, b) =>

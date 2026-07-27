@@ -1,6 +1,6 @@
 # Cocos Creator 2.x（含 2.4）支持
 
-> 状态：**P0–P6 已落地**。P6 = 2.x 纹理导出合成到 originalSize（对齐 3.x engine）。
+> 状态：**P0–P7 已落地**。P7 = 同节点多 Spine/BMFont（index > 0）。
 
 ## 能力矩阵
 
@@ -10,6 +10,13 @@
 | originalSize + offset 合成导出 | ✓ engine | ✓ P6（默认） |
 | Spine / BMFont 自动绑入 | ✓ | ✓ P4b |
 | MCP list/download Spine·BMFont | ✓ | ✓ P5 |
+| 同节点多 Spine/BMFont（index>0） | ✓ | ✓ P7 |
+
+## P7：多组件 index
+
+- `listSpines` / `listBmfonts`：每组件一条，含 `spineIndex` / `bmfontIndex`
+- `--with-spine-fonts`：按 index 下载；manifest 键 `nodeId`（=0）与 `nodeId#N`
+- 磁盘补丁按第 N 个 `sp.Skeleton` / `cc.Label` 绑定
 
 ## P6：2.x 纹理引擎对齐
 

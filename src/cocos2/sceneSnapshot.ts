@@ -183,8 +183,10 @@ const buildNodeSnapshot = (
       flags: {
         isSprite: c.isSprite,
         isSpine: c.isSpine,
+        isBmfont: c.isBmfont,
         isCustom: !c.typeName.startsWith('cc.'),
         spineIndex: c.spineIndex,
+        bmfontIndex: c.bmfontIndex,
       },
     })
   );

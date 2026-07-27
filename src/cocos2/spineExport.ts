@@ -358,6 +358,8 @@ export interface SpineListItem {
   id: string;
   name: string;
   path: string;
+  /** 同节点上第几个 Spine 组件（0-based） */
+  spineIndex: number;
   skeletonName: string;
   animation: string;
   searchText: string;
@@ -370,21 +372,27 @@ export const collectSpineList = (scene: Cc2Node): SpineListItem[] => {
     if (spines.length > 0) {
       const id = getNodeId(node);
       const path = buildNodePath(scene, id);
-      const comp = spines[0] as Record<string, unknown>;
-      const data = (comp.skeletonData ?? comp._skeletonData) as
-        | { name?: string; _name?: string }
-        | null
-        | undefined;
-      const skeletonName = String(data?.name ?? data?._name ?? '');
-      const animation = String(comp.animation ?? comp.defaultAnimation ?? '');
       const name = getNodeName(node);
-      items.push({
-        id,
-        name,
-        path,
-        skeletonName,
-        animation,
-        searchText: `${name} ${path} ${skeletonName}`.toLowerCase(),
+      spines.forEach((raw, spineIndex) => {
+        const comp = raw as Record<string, unknown>;
+        const data = (comp.skeletonData ?? comp._skeletonData) as
+          | { name?: string; _name?: string }
+          | null
+          | undefined;
+        const skeletonName = String(data?.name ?? data?._name ?? '');
+        const animation = String(
+          comp.animation ?? comp.defaultAnimation ?? ''
+        );
+        items.push({
+          id,
+          name,
+          path,
+          spineIndex,
+          skeletonName,
+          animation,
+          searchText:
+            `${name} ${path} ${skeletonName} #${spineIndex}`.toLowerCase(),
+        });
       });
     }
     for (const child of [...getNodeChildren(node)].sort((a, b) =>
