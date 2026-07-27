@@ -20,6 +20,11 @@ import {
   hashTree,
   setNodeActive,
 } from './sceneTree';
+import {
+  downloadExtractPng,
+  extractSpriteFrame,
+  type Cc2SpriteExtractResult,
+} from './spriteExtract';
 
 declare const __INSPECTOR_VERSION__: string;
 
@@ -43,6 +48,8 @@ export class CocosInspector2 {
   private sceneTreeHash = '';
   private inspectorHash = '';
   private updateTimer: number | null = null;
+  private spritePreviewToken = 0;
+  private lastSpriteExtract: Cc2SpriteExtractResult | null = null;
 
   constructor() {
     this.init();
@@ -304,6 +311,61 @@ export class CocosInspector2 {
     }
     const body = this.nodeInspectorContainer?.querySelector('.node-inspector-body');
     if (body) body.innerHTML = renderNodeInspectorHtml(data);
+
+    if (data?.hasSprite && data.nodeId) {
+      void this.loadSpritePreview(data.nodeId);
+    } else {
+      this.lastSpriteExtract = null;
+    }
+  }
+
+  private async loadSpritePreview(nodeId: string): Promise<void> {
+    const token = ++this.spritePreviewToken;
+    const panel = this.nodeInspectorContainer;
+    const meta = panel?.querySelector('.insp-sprite-preview-meta');
+    const canvas = panel?.querySelector(
+      '.insp-sprite-canvas-2x'
+    ) as HTMLCanvasElement | null;
+    const btn = panel?.querySelector(
+      '.sprite-download-btn-2x'
+    ) as HTMLButtonElement | null;
+
+    if (meta) meta.textContent = '提取中…';
+    const result = await extractSpriteFrame(nodeId);
+    if (token !== this.spritePreviewToken) return;
+
+    if (!result || !canvas) {
+      if (meta) meta.textContent = '提取失败（无 DOM 贴图源）';
+      this.lastSpriteExtract = null;
+      return;
+    }
+
+    this.lastSpriteExtract = result;
+    const maxSide = 180;
+    const scale = Math.min(
+      1,
+      maxSide / Math.max(result.canvas.width, result.canvas.height)
+    );
+    canvas.width = Math.max(1, Math.round(result.canvas.width * scale));
+    canvas.height = Math.max(1, Math.round(result.canvas.height * scale));
+    const ctx = canvas.getContext('2d');
+    ctx?.clearRect(0, 0, canvas.width, canvas.height);
+    ctx?.drawImage(result.canvas, 0, 0, canvas.width, canvas.height);
+
+    if (meta) {
+      meta.textContent =
+        `${result.method} · ${result.frameSize.w}×${result.frameSize.h}` +
+        (result.isRotated ? ' · rotated' : '');
+    }
+
+    if (btn && btn.dataset.bound !== '1') {
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', () => {
+        if (!this.lastSpriteExtract) return;
+        downloadExtractPng(this.lastSpriteExtract);
+        this.setStatus(`已下载 ${this.lastSpriteExtract.frameName}.png`);
+      });
+    }
   }
 
   private toggleGamePause(): void {

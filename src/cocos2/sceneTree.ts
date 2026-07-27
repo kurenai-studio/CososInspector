@@ -26,6 +26,7 @@ export type Cc2Node = {
   color?: { r?: number; g?: number; b?: number; a?: number };
   _components?: unknown[];
   getComponents?: (type?: unknown) => unknown[];
+  getComponent?: (type?: unknown) => unknown;
   getContentSize?: () => { width: number; height: number };
 };
 

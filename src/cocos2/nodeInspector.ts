@@ -16,6 +16,7 @@ export interface ComponentInspectInfo {
   shortName: string;
   enabled: boolean;
   rows: InspectRow[];
+  isSprite: boolean;
 }
 
 export interface NodeInspectorData {
@@ -26,6 +27,7 @@ export interface NodeInspectorData {
   anchor: string;
   opacity: string;
   scale: string;
+  hasSprite: boolean;
   components: ComponentInspectInfo[];
 }
 
@@ -102,7 +104,8 @@ const inspectComponent = (comp: unknown): ComponentInspectInfo => {
   };
 
   // 常见 2.x 可渲染组件字段
-  if (/Sprite/i.test(shortName)) {
+  const isSprite = /Sprite/i.test(shortName) && !/Spine|Skeleton/i.test(shortName);
+  if (isSprite) {
     const frame = (c._spriteFrame ?? c.spriteFrame) as
       | { name?: string; _name?: string }
       | null
@@ -124,7 +127,7 @@ const inspectComponent = (comp: unknown): ComponentInspectInfo => {
     rows.push({ label: 'type', value: typeName });
   }
 
-  return { typeName, shortName, enabled, rows };
+  return { typeName, shortName, enabled, rows, isSprite };
 };
 
 export function collectNodeInspectorData(
@@ -146,6 +149,7 @@ export function collectNodeInspectorData(
     anchor: `${fmt(node.anchorX)}, ${fmt(node.anchorY)}`,
     opacity: node.opacity != null ? String(Math.round(node.opacity)) : '-',
     scale: `${fmt(node.scaleX)}, ${fmt(node.scaleY)}`,
+    hasSprite: components.some((c) => c.isSprite),
     components,
   };
 }
@@ -200,12 +204,21 @@ export function renderNodeInspectorHtml(data: NodeInspectorData | null): string 
       const stateBadge = comp.enabled
         ? '<span class="insp-badge insp-badge-on">启用</span>'
         : '<span class="insp-badge insp-badge-off">禁用</span>';
+      const preview = comp.isSprite
+        ? `<div class="insp-sprite-preview-2x" data-sprite-preview-2x>
+            <div class="insp-sprite-preview-toolbar">
+              <button type="button" class="sprite-download-btn-2x" title="下载裁切后 PNG">下载 PNG</button>
+              <span class="insp-sprite-preview-meta">加载中…</span>
+            </div>
+            <canvas class="insp-sprite-canvas-2x" width="1" height="1"></canvas>
+          </div>`
+        : '';
       return `<section class="insp-comp-block">
         <header class="insp-comp-header">
           <span class="insp-comp-name">${escapeHtml(comp.shortName)}</span>
           <span class="insp-comp-actions">${stateBadge}</span>
         </header>
-        <div class="insp-comp-body">${rows}</div>
+        <div class="insp-comp-body">${rows}${preview}</div>
       </section>`;
     })
     .join('');
