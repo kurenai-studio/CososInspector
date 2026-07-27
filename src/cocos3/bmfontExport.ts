@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { findNodeById, getSceneRoot } from './sceneTree';
+import { buildNodePath, findNodeById, getNodeId, getSceneRoot } from './sceneTree';
 import {
   extractFullTexturePixels,
   type TextureRuntime,
@@ -373,4 +373,39 @@ export const downloadBmfontExport = async (
     triggerBlobDownload(result.zipBlob, result.zipName);
   }
   return result;
+};
+
+export interface BmfontListItem {
+  id: string;
+  name: string;
+  path: string;
+  fontName: string;
+  searchText: string;
+}
+
+/** 扁平收集使用 BMFont 的 Label 节点 */
+export const collectBmfontList = (scene: cc.Node): BmfontListItem[] => {
+  const items: BmfontListItem[] = [];
+  const walk = (node: cc.Node): void => {
+    const labels = getBmfontLabels(node);
+    if (labels.length > 0) {
+      const id = getNodeId(node);
+      const path = buildNodePath(scene, id);
+      const font = getLabelFont(labels[0]!);
+      const fontName = String(font?.name ?? font?._name ?? '');
+      items.push({
+        id,
+        name: node.name || '(unnamed)',
+        path,
+        fontName,
+        searchText: `${node.name} ${path} ${fontName}`.toLowerCase(),
+      });
+    }
+    const children = [...(node.children ?? [])]
+      .filter(Boolean)
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    for (const child of children) walk(child);
+  };
+  walk(scene);
+  return items;
 };

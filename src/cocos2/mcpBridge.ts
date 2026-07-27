@@ -31,8 +31,8 @@ import {
   extractSpriteFrame,
   nodeHasSprite,
 } from './spriteExtract';
-import { exportSpineFromNode } from './spineExport';
-import { exportBmfontFromNode } from './bmfontExport';
+import { exportSpineFromNode, collectSpineList } from './spineExport';
+import { exportBmfontFromNode, collectBmfontList } from './bmfontExport';
 
 export interface Cc2SpriteListItem {
   id: string;
@@ -291,6 +291,18 @@ export const cocosInspectorMcpApi2 = {
     const scene = getSceneRoot();
     if (!scene) return [];
     return collectSpriteList(scene);
+  },
+
+  listSpines() {
+    const scene = getSceneRoot();
+    if (!scene) return [];
+    return collectSpineList(scene);
+  },
+
+  listBmfonts() {
+    const scene = getSceneRoot();
+    if (!scene) return [];
+    return collectBmfontList(scene);
   },
 
   evalPage(expr: string): { ok: true; result: unknown } | { ok: false; error: string } {

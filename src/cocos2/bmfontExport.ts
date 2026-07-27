@@ -1,10 +1,11 @@
 import JSZip from 'jszip';
-import { findNodeById, getNodeName, getSceneRoot, type Cc2Node } from './sceneTree';
+import { findNodeById, getNodeName, getSceneRoot, getNodeId, getNodeChildren, type Cc2Node } from './sceneTree';
 import { extractFullTexturePixels2x } from './spriteExtract';
 import {
   imageDataToPngBlob,
   triggerBlobDownload,
 } from '../cocos3/texturePng';
+import { buildNodePath } from './sceneSnapshot';
 
 type CompRecord = Record<string, unknown>;
 
@@ -354,4 +355,40 @@ export const downloadBmfontExport = async (
     triggerBlobDownload(result.zipBlob, result.zipName);
   }
   return result;
+};
+
+export interface BmfontListItem {
+  id: string;
+  name: string;
+  path: string;
+  fontName: string;
+  searchText: string;
+}
+
+export const collectBmfontList = (scene: Cc2Node): BmfontListItem[] => {
+  const items: BmfontListItem[] = [];
+  const walk = (node: Cc2Node): void => {
+    const labels = getBmfontLabels(node);
+    if (labels.length > 0) {
+      const id = getNodeId(node);
+      const path = buildNodePath(scene, id);
+      const font = getLabelFont(labels[0]!);
+      const fontName = String(font?.name ?? font?._name ?? '');
+      const name = getNodeName(node);
+      items.push({
+        id,
+        name,
+        path,
+        fontName,
+        searchText: `${name} ${path} ${fontName}`.toLowerCase(),
+      });
+    }
+    for (const child of [...getNodeChildren(node)].sort((a, b) =>
+      getNodeName(a).localeCompare(getNodeName(b))
+    )) {
+      walk(child);
+    }
+  };
+  walk(scene);
+  return items;
 };

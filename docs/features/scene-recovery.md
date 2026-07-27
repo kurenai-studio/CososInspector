@@ -158,6 +158,12 @@ npm run cocos-scene-to-creator -- tmp/godeebxp-scene-snapshot.json `
 | F | Label / Widget / Spine 占位（P3b） | ✅ 文本与对齐可还原；Spine 无骨架资源 |
 | G | 2.x Spine/BMFont zip 导出（P4a） | ✅ 面板导出；手动拖入 Creator |
 | H | Spine/BMFont 自动绑入（P4b） | ✅ `--with-spine-fonts` |
+| I | live path 匹配 + MCP 下载（P5） | ✅ list/download Spine·BMFont |
+
+### P5（MCP）
+
+- `cocos_list_spines` / `cocos_list_bmfonts`
+- `cocos_download_spine` / `cocos_download_bmfont`
 
 ### P4b（自动绑 Spine / BMFont）
 

@@ -40,12 +40,8 @@ import {
   showNodeBoundsOverlay,
 } from './nodeBoundsOverlay';
 import { uploadPngBase64ToShare, uploadBlobToShare } from './shareUpload';
-import {
-  exportSpineFromNode,
-} from './spineExport';
-import {
-  exportBmfontFromNode,
-} from './bmfontExport';
+import { exportSpineFromNode, collectSpineList } from './spineExport';
+import { exportBmfontFromNode, collectBmfontList } from './bmfontExport';
 import {
   clearTextureExtractLogs,
   getTextureExtractLogs,
@@ -295,6 +291,18 @@ export const cocosInspectorMcpApi = {
     const scene = getSceneRoot();
     if (!scene) return [];
     return collectSpriteList(scene);
+  },
+
+  listSpines() {
+    const scene = getSceneRoot();
+    if (!scene) return [];
+    return collectSpineList(scene);
+  },
+
+  listBmfonts() {
+    const scene = getSceneRoot();
+    if (!scene) return [];
+    return collectBmfontList(scene);
   },
 
   showNodeBounds(

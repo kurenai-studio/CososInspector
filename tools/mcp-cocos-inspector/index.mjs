@@ -91,7 +91,11 @@ async function cdpApiCall(method, argList, opts) {
 
 const BRIDGE_TIMEOUT_BY_METHOD = {
   downloadTexture: 300_000,
+  downloadSpine: 300_000,
+  downloadBmfont: 180_000,
   listSprites: 180_000,
+  listSpines: 120_000,
+  listBmfonts: 120_000,
   exportSceneSnapshot: 300_000,
 };
 
@@ -227,6 +231,70 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           wsPort: { type: 'number' },
           cdpPort: { type: 'number' },
         },
+      },
+    },
+    {
+      name: 'cocos_list_spines',
+      description: '列出场景中 Spine（sp.Skeleton）节点：id/name/path/skeletonName',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          pageUrlMatch: { type: 'string' },
+          domain: { type: 'string' },
+          wsPort: { type: 'number' },
+          cdpPort: { type: 'number' },
+        },
+      },
+    },
+    {
+      name: 'cocos_list_bmfonts',
+      description: '列出使用 BMFont 的 Label 节点：id/name/path/fontName',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          pageUrlMatch: { type: 'string' },
+          domain: { type: 'string' },
+          wsPort: { type: 'number' },
+          cdpPort: { type: 'number' },
+        },
+      },
+    },
+    {
+      name: 'cocos_download_spine',
+      description:
+        '从试玩页导出 Spine zip（骨架+atlas+纹理）。默认 share 通道；可 outPath 落盘',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          nodeId: { type: 'string' },
+          outPath: { type: 'string', description: '输出 .zip 路径（可选）' },
+          spineIndex: { type: 'number' },
+          delivery: { type: 'string', enum: ['share', 'inline'] },
+          pageUrlMatch: { type: 'string' },
+          domain: { type: 'string' },
+          wsPort: { type: 'number' },
+          cdpPort: { type: 'number' },
+        },
+        required: ['nodeId'],
+      },
+    },
+    {
+      name: 'cocos_download_bmfont',
+      description:
+        '从试玩页导出 BMFont zip（.fnt+png）。默认 share 通道；可 outPath 落盘',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          nodeId: { type: 'string' },
+          outPath: { type: 'string', description: '输出 .zip 路径（可选）' },
+          bmfontIndex: { type: 'number' },
+          delivery: { type: 'string', enum: ['share', 'inline'] },
+          pageUrlMatch: { type: 'string' },
+          domain: { type: 'string' },
+          wsPort: { type: 'number' },
+          cdpPort: { type: 'number' },
+        },
+        required: ['nodeId'],
       },
     },
     {
@@ -600,6 +668,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
+    if (name === 'cocos_list_spines') {
+      const list = await apiCall('listSpines', [], opts);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(list, null, 2) }],
+      };
+    }
+
+    if (name === 'cocos_list_bmfonts') {
+      const list = await apiCall('listBmfonts', [], opts);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(list, null, 2) }],
+      };
+    }
+
     if (name === 'cocos_get_scene_tree') {
       await waitExt(opts);
       const tree = await apiCall('getSceneTree', [], opts);
@@ -703,6 +785,73 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 height: res.height,
                 filename: res.filename,
                 extractMethod: res.detail?.extractMethod,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+
+    if (name === 'cocos_download_spine' || name === 'cocos_download_bmfont') {
+      const target = await resolveBridgeTarget(connOpts(opts ?? {}));
+      const delivery = args.delivery ?? 'share';
+      const method =
+        name === 'cocos_download_spine' ? 'downloadSpine' : 'downloadBmfont';
+      const dlOpts = {
+        delivery,
+        wsPort: target.wsPort,
+        ...(name === 'cocos_download_spine' && args.spineIndex != null
+          ? { spineIndex: Number(args.spineIndex) }
+          : {}),
+        ...(name === 'cocos_download_bmfont' && args.bmfontIndex != null
+          ? { bmfontIndex: Number(args.bmfontIndex) }
+          : {}),
+      };
+      const res = await apiCall(method, [args.nodeId, dlOpts], opts);
+      if (!res?.ok) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+          isError: true,
+        };
+      }
+      const outPath = args.outPath ? resolve(args.outPath) : null;
+      let shareRel = res.sharePath ?? null;
+      if (res.delivery === 'share' && res.sharePath) {
+        if (outPath) {
+          mkdirSync(dirname(outPath), { recursive: true });
+          copyFileSync(resolveSharePath(res.sharePath), outPath);
+        }
+      } else if (res.base64) {
+        const zipName = res.zipName ?? `${args.nodeId}.zip`;
+        shareRel = writeShareOutput(zipName, res.base64);
+        if (outPath) writeBase64File(outPath, res.base64);
+      } else {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ ok: false, error: '响应无 sharePath/base64' }, null, 2),
+            },
+          ],
+          isError: true,
+        };
+      }
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                ok: true,
+                delivery: res.delivery ?? delivery,
+                shareDir: getShareDir(),
+                sharePath: shareRel,
+                shareUrl: res.shareUrl ?? (shareRel ? shareFileUrl(shareRel) : undefined),
+                saved: outPath ?? undefined,
+                zipName: res.zipName,
+                fileCount: res.fileCount,
               },
               null,
               2

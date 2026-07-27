@@ -1,6 +1,6 @@
 # Cocos Creator 2.x（含 2.4）支持
 
-> 状态：**P0–P4b 已落地**。P4b = `scene-to-creator --with-spine-fonts` 自动导出并绑定 Spine/BMFont。
+> 状态：**P0–P5 已落地**。P5 = Spine/BMFont live path 匹配 + MCP 列表/下载工具。
 
 ## 能力矩阵
 
@@ -9,6 +9,17 @@
 | 场景复刻 Sprite/UI/Label/Widget | ✓ | ✓ |
 | Spine / BMFont zip 面板导出 | ✓ | ✓ P4a |
 | Spine / BMFont **自动绑入 Creator** | ✓ P4b | ✓ P4b |
+| Spine / BMFont live path 匹配 | ✓ P5 | ✓ P5 |
+| MCP `list/download` Spine·BMFont | ✓ P5 | ✓ P5 |
+
+## P5：MCP 与路径匹配
+
+MCP 工具：
+
+- `cocos_list_spines` / `cocos_list_bmfonts`
+- `cocos_download_spine` / `cocos_download_bmfont`
+
+`scene-to-creator --with-spine-fonts` 先 `listSpines/listBmfonts`，按 path 对齐 live nodeId 再导出（与 Sprite 一致）。
 
 ## P4b：自动迁入
 

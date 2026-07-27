@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { findNodeById, getSceneRoot } from './sceneTree';
+import { buildNodePath, findNodeById, getNodeId, getSceneRoot } from './sceneTree';
 import {
   extractFullTexturePixels,
   type TextureRuntime,
@@ -386,4 +386,48 @@ export const nodeHasSpine = (nodeId: string): boolean => {
   const node = findNodeById(scene, nodeId);
   if (!node) return false;
   return getSpineComponents(node).length > 0;
+};
+
+export interface SpineListItem {
+  id: string;
+  name: string;
+  path: string;
+  skeletonName: string;
+  animation: string;
+  searchText: string;
+}
+
+/** 扁平收集场景中所有 Spine 节点 */
+export const collectSpineList = (scene: cc.Node): SpineListItem[] => {
+  const items: SpineListItem[] = [];
+  const walk = (node: cc.Node): void => {
+    const spines = getSpineComponents(node);
+    if (spines.length > 0) {
+      const id = getNodeId(node);
+      const path = buildNodePath(scene, id);
+      const comp = spines[0] as Record<string, unknown>;
+      const data = (comp.skeletonData ?? comp._skeletonData) as
+        | { name?: string; _name?: string }
+        | null
+        | undefined;
+      const skeletonName = String(data?.name ?? data?._name ?? '');
+      const animation = String(
+        comp.animation ?? comp.defaultAnimation ?? ''
+      );
+      items.push({
+        id,
+        name: node.name || '(unnamed)',
+        path,
+        skeletonName,
+        animation,
+        searchText: `${node.name} ${path} ${skeletonName}`.toLowerCase(),
+      });
+    }
+    const children = [...(node.children ?? [])]
+      .filter(Boolean)
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    for (const child of children) walk(child);
+  };
+  walk(scene);
+  return items;
 };

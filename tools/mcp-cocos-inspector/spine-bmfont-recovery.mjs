@@ -1,5 +1,6 @@
 /**
  * scene-to-creator：从试玩页导出 Spine/BMFont zip → 解压到 recovered → 生成 manifest
+ * 按 path 匹配 live 节点 ID（避免快照 id 漂移）
  */
 import fs from 'fs';
 import path from 'path';
@@ -23,10 +24,8 @@ const collectBmfontNodes = (node, out = []) => {
     if (!/Label/.test(c.typeName || '') || /RichText/.test(c.typeName || '')) {
       return false;
     }
-    // 有「字号」且文本组件：导出时再验证；或 rows 含字体暗示
     return true;
   });
-  // 仅尝试带 Label 的节点；downloadBmfont 失败则跳过
   if (isBm) out.push({ id: node.id, name: node.name, path: node.path });
   for (const ch of node.children ?? []) collectBmfontNodes(ch, out);
   return out;
@@ -41,6 +40,34 @@ const readMetaUuid = (absPath) => {
   } catch {
     return null;
   }
+};
+
+const buildLivePathMap = (liveList = []) => {
+  const map = new Map();
+  for (const sp of liveList) {
+    const norm = normalizeScenePath(sp.path);
+    const keys = [
+      norm,
+      sp.path,
+      norm && sp.skeletonName ? `${norm}@@${sp.skeletonName}` : null,
+      norm && sp.fontName ? `${norm}@@${sp.fontName}` : null,
+      sp.name && sp.skeletonName ? `${sp.name}@@${sp.skeletonName}` : null,
+      sp.name && sp.fontName ? `${sp.name}@@${sp.fontName}` : null,
+    ].filter(Boolean);
+    for (const key of keys) {
+      if (!map.has(key)) map.set(key, sp);
+    }
+  }
+  return map;
+};
+
+const resolveLiveId = (snapNode, liveByPath) => {
+  const pathKey = normalizeScenePath(snapNode.path);
+  const hit =
+    liveByPath.get(pathKey) ??
+    liveByPath.get(snapNode.path) ??
+    liveByPath.get(snapNode.name);
+  return hit?.id ?? snapNode.id;
 };
 
 /**
@@ -60,7 +87,7 @@ export const exportSpineBmfontAssets = async (snapshot, args, inspectorCall) => 
 
   const spineManifest = {};
   const bmfontManifest = {};
-  const spineAssetCache = new Map(); // zipName → entry
+  const spineAssetCache = new Map();
   const bmfontAssetCache = new Map();
 
   let spineOk = 0;
@@ -68,21 +95,55 @@ export const exportSpineBmfontAssets = async (snapshot, args, inspectorCall) => 
   let bmOk = 0;
   let bmFail = 0;
 
+  let liveSpines = [];
+  let liveBmfonts = [];
+  try {
+    liveSpines = await inspectorCall(args.wsPort, 'listSpines', [], {
+      pageUrlMatch: args.pageUrlMatch,
+      timeoutMs: 120_000,
+    });
+  } catch (e) {
+    console.error(
+      `[scene-to-creator] listSpines 失败，回退快照 id: ${e instanceof Error ? e.message : e}`
+    );
+  }
+  try {
+    liveBmfonts = await inspectorCall(args.wsPort, 'listBmfonts', [], {
+      pageUrlMatch: args.pageUrlMatch,
+      timeoutMs: 120_000,
+    });
+  } catch (e) {
+    console.error(
+      `[scene-to-creator] listBmfonts 失败，回退快照 id: ${e instanceof Error ? e.message : e}`
+    );
+  }
+
+  const liveSpineByPath = buildLivePathMap(
+    Array.isArray(liveSpines) ? liveSpines : []
+  );
+  const liveBmByPath = buildLivePathMap(
+    Array.isArray(liveBmfonts) ? liveBmfonts : []
+  );
+
   console.error(
-    `[scene-to-creator] Spine 节点 ${spineNodes.length} · Label 候选 ${labelNodes.length}`
+    `[scene-to-creator] Spine 快照 ${spineNodes.length} / live ${liveSpineByPath.size}` +
+      ` · BMFont 候选 ${labelNodes.length} / live ${liveBmByPath.size}`
   );
 
   for (const sp of spineNodes) {
+    const liveId = resolveLiveId(sp, liveSpineByPath);
     try {
       const dl = await inspectorCall(
         args.wsPort,
         'downloadSpine',
-        [sp.id, { delivery: 'share', wsPort: args.wsPort, spineIndex: 0 }],
+        [liveId, { delivery: 'share', wsPort: args.wsPort, spineIndex: 0 }],
         { pageUrlMatch: args.pageUrlMatch, timeoutMs: 300_000 }
       );
       if (!dl?.ok) {
         spineFail += 1;
-        console.error(`[scene-to-creator] Spine 失败 ${sp.path}: ${dl?.error ?? 'unknown'}`);
+        console.error(
+          `[scene-to-creator] Spine 失败 ${sp.path} live=${liveId}: ${dl?.error ?? 'unknown'}`
+        );
         continue;
       }
 
@@ -102,15 +163,12 @@ export const exportSpineBmfontAssets = async (snapshot, args, inspectorCall) => 
         const primary = unpacked.primaryAsset;
         if (!primary) throw new Error('zip 内无 json/skel');
         const primaryAbs = path.join(destDir, primary);
-        const rel = path
-          .relative(args.project, primaryAbs)
-          .replace(/\\/g, '/');
-        const dbUrl = `db://${rel}`;
+        const rel = path.relative(args.project, primaryAbs).replace(/\\/g, '/');
         entry = {
           zipName: dl.zipName,
           baseName,
           rel,
-          dbUrl,
+          dbUrl: `db://${rel}`,
           primaryAbs,
           skelUuid: readMetaUuid(primaryAbs),
         };
@@ -121,6 +179,7 @@ export const exportSpineBmfontAssets = async (snapshot, args, inspectorCall) => 
       spineManifest[sp.id] = {
         ...entry,
         nodeId: sp.id,
+        liveId,
         nodePath: normalizeScenePath(sp.path),
         nodeName: sp.name,
       };
@@ -134,15 +193,15 @@ export const exportSpineBmfontAssets = async (snapshot, args, inspectorCall) => 
   }
 
   for (const lab of labelNodes) {
+    const liveId = resolveLiveId(lab, liveBmByPath);
     try {
       const dl = await inspectorCall(
         args.wsPort,
         'downloadBmfont',
-        [lab.id, { delivery: 'share', wsPort: args.wsPort, bmfontIndex: 0 }],
+        [liveId, { delivery: 'share', wsPort: args.wsPort, bmfontIndex: 0 }],
         { pageUrlMatch: args.pageUrlMatch, timeoutMs: 180_000 }
       );
       if (!dl?.ok) {
-        // 多数 Label 不是 BMFont，静默跳过
         continue;
       }
 
@@ -162,9 +221,7 @@ export const exportSpineBmfontAssets = async (snapshot, args, inspectorCall) => 
         const primary = unpacked.primaryAsset;
         if (!primary) throw new Error('zip 内无 .fnt');
         const primaryAbs = path.join(destDir, primary);
-        const rel = path
-          .relative(args.project, primaryAbs)
-          .replace(/\\/g, '/');
+        const rel = path.relative(args.project, primaryAbs).replace(/\\/g, '/');
         entry = {
           zipName: dl.zipName,
           baseName,
@@ -180,6 +237,7 @@ export const exportSpineBmfontAssets = async (snapshot, args, inspectorCall) => 
       bmfontManifest[lab.id] = {
         ...entry,
         nodeId: lab.id,
+        liveId,
         nodePath: normalizeScenePath(lab.path),
         nodeName: lab.name,
       };

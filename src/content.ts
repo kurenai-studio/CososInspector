@@ -6,6 +6,8 @@ const API_CALL_TIMEOUT_BY_METHOD: Record<string, number> = {
   downloadSpine: 300_000,
   downloadBmfont: 180_000,
   listSprites: 180_000,
+  listSpines: 120_000,
+  listBmfonts: 120_000,
   exportSceneSnapshot: 300_000,
 };
 

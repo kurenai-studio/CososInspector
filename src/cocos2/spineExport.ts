@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
-import { findNodeById, getNodeName, getSceneRoot, type Cc2Node } from './sceneTree';
+import { findNodeById, getNodeName, getSceneRoot, getNodeId, getNodeChildren, type Cc2Node } from './sceneTree';
+import { buildNodePath } from './sceneSnapshot';
 import { extractFullTexturePixels2x } from './spriteExtract';
 import {
   imageDataToPngBlob,
@@ -351,4 +352,47 @@ export const nodeHasSpine = (nodeId: string): boolean => {
   const node = findNodeById(scene, nodeId);
   if (!node) return false;
   return getSpineComponents(node).length > 0;
+};
+
+export interface SpineListItem {
+  id: string;
+  name: string;
+  path: string;
+  skeletonName: string;
+  animation: string;
+  searchText: string;
+}
+
+export const collectSpineList = (scene: Cc2Node): SpineListItem[] => {
+  const items: SpineListItem[] = [];
+  const walk = (node: Cc2Node): void => {
+    const spines = getSpineComponents(node);
+    if (spines.length > 0) {
+      const id = getNodeId(node);
+      const path = buildNodePath(scene, id);
+      const comp = spines[0] as Record<string, unknown>;
+      const data = (comp.skeletonData ?? comp._skeletonData) as
+        | { name?: string; _name?: string }
+        | null
+        | undefined;
+      const skeletonName = String(data?.name ?? data?._name ?? '');
+      const animation = String(comp.animation ?? comp.defaultAnimation ?? '');
+      const name = getNodeName(node);
+      items.push({
+        id,
+        name,
+        path,
+        skeletonName,
+        animation,
+        searchText: `${name} ${path} ${skeletonName}`.toLowerCase(),
+      });
+    }
+    for (const child of [...getNodeChildren(node)].sort((a, b) =>
+      getNodeName(a).localeCompare(getNodeName(b))
+    )) {
+      walk(child);
+    }
+  };
+  walk(scene);
+  return items;
 };
