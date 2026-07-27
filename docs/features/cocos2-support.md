@@ -1,6 +1,6 @@
 # Cocos Creator 2.x（含 2.4）支持
 
-> 状态：**P0–P8a 已落地**。P8a = Label TTF/系统字体元数据 + RichText 占位。
+> 状态：**v3.0.0 起正式双引擎**（P0–P8a）。同一扩展同时支持 Creator 3.x 与 2.x。
 
 ## 能力矩阵
 

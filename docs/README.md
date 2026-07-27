@@ -1,6 +1,7 @@
 # Cocos Inspector 3 文档索引
 
-当前主能力：**试玩页场景读取（S）+ Creator 场景复刻（P）+ MCP 自动化**。版本见 `package.json`（如 v2.1.0）。
+当前主能力：**试玩页场景读取（S）+ Creator 场景复刻（P）+ MCP 自动化**。  
+**v3.0.0**：同一扩展正式支持 Creator **3.x + 2.x（含 2.4）**（版本见 `package.json`）。
 
 ## Agent Skills（本仓库）
 

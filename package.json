@@ -1,6 +1,6 @@
 {
   "name": "cocosinspector",
-  "version": "2.3.0",
+  "version": "3.0.0",
   "description": "Cocos Creator 3.x / 2.x 节点树查看器 Chrome 扩展",
   "main": "dist/content.js",
   "scripts": {
