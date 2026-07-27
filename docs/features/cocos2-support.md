@@ -1,6 +1,6 @@
 # Cocos Creator 2.x（含 2.4）支持
 
-> 状态：**P0 + P1 + P2 已落地**（节点树 / Inspector / 暂停 / Sprite 裁切下载 / MCP 桥接与场景快照）。场景复刻（P3）仍仅 3.x 目标工程。
+> 状态：**P0–P3a 已落地**（节点树 / Inspector / 暂停 / Sprite 裁切 / MCP 快照 / **→ Creator 3.x 复刻适配**）。P3b（Widget/Label/Spine）未做。
 
 ## 能力矩阵
 
@@ -12,45 +12,36 @@
 | 暂停 / 继续 | ✓ | ✓ P0 |
 | Sprite 纹理预览 / PNG 下载（图集裁切+旋转还原） | ✓ | ✓ P1 |
 | MCP 桥接 / 场景快照 / 纹理下载 API | ✓ | ✓ P2（子集） |
-| 纹理替换 / 换皮包 / 节点画框 / 截图 | ✓ | ✗（P2 返回明确错误） |
-| 场景复刻 | ✓ | ✗（P3，目标仍为 Creator 3 工程） |
+| 纹理替换 / 换皮包 / 节点画框 / 截图 | ✓ | ✗（返回明确错误） |
+| 场景复刻到 Creator 3.x | ✓ | ✓ P3a（路径/sizeMode/设计分辨率/Camera） |
 
 ## 代码入口
 
-- 统一检测：`src/engine/detect.ts`（`detectEngineFamily` → `'2' | '3'`）
+- 统一检测：`src/engine/detect.ts`
 - 启动分流：`src/injected.ts` → `bootInspector()`
-- 2.x 实现：`src/cocos2/`（`sceneTree` / `nodeInspector` / `gamePause` / `spriteExtract` / `sceneSnapshot` / `mcpBridge` / `panel`）
+- 2.x：`src/cocos2/`（含 `sceneSnapshot` / `mcpBridge`）
+- 复刻工具：`tools/mcp-cocos-inspector/scene-to-creator.mjs`（读 `engineFamily`）
 
-## P2 MCP 子集
+## P3a 映射要点
 
-安装 `window.__cocosInspectorApi`（与 3.x 同协议），可用：
+1. **path**：快照使用 ` › `（与 3.x 一致）；工具对旧 `/` 快照做归一  
+2. **sizeMode**：2.x `CUSTOM=0/TRIMMED=1/RAW=2` → 快照内写 **3.x 枚举**（0/1/2 = TRIMMED/RAW/CUSTOM）  
+3. **spriteFrame**：补 `offset` / `originalSize`  
+4. **designResolution**：快照顶栏 `designResolution` + Canvas 组件行  
+5. **Camera**：磁盘补丁在无 Camera 时于 Canvas 下合成  
 
-- `getPageInfo`（含 `engineFamily: '2'`）
-- `getSceneTree` / `exportSceneSnapshot`（`engineFamily: '2'`）
-- `pauseGame` / `resumeGame` / `togglePause` / `getPauseState`
-- `setNodeActive` / `listSprites` / `getSpriteDetail` / `downloadTexture`
-- `evalPage`
-
-快照字段对齐 3.x `SceneSnapshot`（Transform / uiTransform / spriteFrame / 组件摘要）。
+复刻命令与 3.x 相同，见 [scene-recovery.md](scene-recovery.md) / Skill `inspector-scene-recovery`。
 
 ## 验收
 
-### P0
-1. 打开 **Cocos Creator 2.4** 试玩页，加载本扩展  
-2. 面板标题为 `Cocos Inspector 2.x`，引擎版本显示 `2.4.x`  
-3. 节点树可展开、搜索、勾选 Active；暂停可停住画面  
+### P0 / P1 / P2
+见此前章节（节点树、贴图预览、MCP 连接与快照）。
 
-### P1
-1. 选中带 `cc.Sprite` 的节点  
-2. Inspector 出现贴图预览（棋盘格底）与「下载 PNG」  
-3. 旋转图集帧应正向显示；控制台有 `[纹理提取:2.x] name(uuid) …` 日志  
+### P3a
+1. 2.4 试玩页导出快照：`engineFamily === '2'`，path 含 ` › `，`spriteFrame.sizeMode` 为 3.x 枚举  
+2. `npm run cocos-scene-to-creator -- <snapshot> --clear --with-textures …`  
+3. Creator 场景节点尺寸非大量 100×100；主 Sprite 可见；缺 Camera 时补丁可合成  
 
-### P2
-1. 面板 MCP 状态可显示「已连接」（Cursor 启用 cocos-inspector MCP）  
-2. `cocos_page_info` 返回 `engineFamily`/`engineVersion` 含 2.x  
-3. `cocos_export_scene_snapshot` 可导出 JSON，`engineFamily === '2'`  
-4. `cocos_download_texture` 能导出 Sprite PNG（share 或 inline）  
+## 后续（P3b）
 
-## 后续
-
-P3：2.x 快照 → Creator 3.x 场景复刻映射。
+Widget 映射、Label/Spine、2.x originalCanvas 引擎对齐合成。

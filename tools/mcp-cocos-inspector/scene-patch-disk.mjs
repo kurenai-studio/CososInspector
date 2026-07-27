@@ -417,6 +417,34 @@ export function patchCanvasCameraOnDisk(
     }
   }
 
+  // 2.x UI 常无 Camera 节点：在 Canvas 下合成一个
+  if (!uiCamNode && canvasNode && canvasIdx >= 0) {
+    const newNodeId = scene.length;
+    uiCamIdx = newNodeId;
+    uiCamNode = {
+      __type__: 'cc.Node',
+      _name: 'Camera',
+      _objFlags: 0,
+      __editorExtras__: {},
+      _parent: { __id__: canvasIdx },
+      _children: [],
+      _active: true,
+      _components: [],
+      _prefab: null,
+      _lpos: { __type__: 'cc.Vec3', x: 0, y: 0, z: 1000 },
+      _lrot: { __type__: 'cc.Quat', x: 0, y: 0, z: 0, w: 1 },
+      _lscale: { __type__: 'cc.Vec3', x: 1, y: 1, z: 1 },
+      _mobility: 0,
+      _layer: 1073741824,
+      _euler: { __type__: 'cc.Vec3', x: 0, y: 0, z: 0 },
+      _id: '',
+    };
+    scene.push(uiCamNode);
+    byId.set(newNodeId, uiCamNode);
+    if (!canvasNode._children) canvasNode._children = [];
+    canvasNode._children.push({ __id__: newNodeId });
+  }
+
   if (!uiCamNode || !canvasNode || uiCamIdx < 0 || canvasIdx < 0) {
     return {
       ok: false,
@@ -598,6 +626,11 @@ export function buildPathToNodeUuidMap(sceneAbs) {
 /** 从 manifest + 场景路径映射生成磁盘补丁 bindings */
 export function buildBindingsFromManifest(manifest, pathMap, projectRoot) {
   const bindings = [];
+  const normalize = (p) =>
+    String(p || '')
+      .replace(/\s*[›>／/]\s*/g, ' › ')
+      .replace(/\s*›\s*/g, ' › ')
+      .trim();
   for (const [nodeId, entry] of Object.entries(manifest ?? {})) {
     const rel = entry.rel;
     const metaPath = `${projectRoot}/${rel}.meta`.replace(/\\/g, '/');
@@ -612,22 +645,19 @@ export function buildBindingsFromManifest(manifest, pathMap, projectRoot) {
     }
     if (!sfUuid) continue;
 
-    // 延迟导入避免循环依赖
-    // path 候选在调用方用 lookup；这里内联剥前缀
-    const raw = entry.nodePath || '';
+    const raw = normalize(entry.nodePath || '');
     const candidates = [
       raw,
       raw.replace(/^main › /i, ''),
       raw.replace(/^main › /i, '').replace(/^game_scene › /i, ''),
       raw.replace(/^game_scene › /i, ''),
     ];
-    const m = candidates[2]?.match(/^[^›]+ › (.+)$/);
+    const stripped = candidates[2] || candidates[0];
+    const m = stripped?.match(/^[^›]+ › (.+)$/);
     if (m) candidates.push(m[1]);
     let nodeUuid = null;
     for (const k of candidates) {
-      const key = String(k || '')
-        .replace(/\s*›\s*/g, ' › ')
-        .trim();
+      const key = normalize(k);
       if (key && pathMap.has(key)) {
         nodeUuid = pathMap.get(key);
         break;

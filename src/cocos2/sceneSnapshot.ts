@@ -26,7 +26,7 @@ import type { TreeNodeInfo } from '../cocos3/sceneTree';
 
 export type { SceneSnapshot, SceneSnapshotOptions };
 
-/** 根→目标路径（用 / 连接名称） */
+/** 根→目标路径（与 3.x / 磁盘补丁一致，用 › 连接） */
 export const buildNodePath = (root: Cc2Node, targetId: string): string => {
   const parts: string[] = [];
   const walk = (node: Cc2Node, acc: string[]): boolean => {
@@ -42,7 +42,7 @@ export const buildNodePath = (root: Cc2Node, targetId: string): string => {
     return false;
   };
   walk(root, []);
-  return parts.join('/');
+  return parts.join(' › ');
 };
 
 const collectTransform = (node: Cc2Node): SceneNodeSnapshot['transform'] => ({
@@ -88,11 +88,11 @@ const collectSpriteFrameSnapshot = (
     return {
       frameName: meta.frameName,
       frameRect: { ...meta.rect },
-      offset: { x: 0, y: 0 },
-      originalSize: { w: meta.frameSize.w, h: meta.frameSize.h },
+      offset: { ...meta.offset },
+      originalSize: { w: meta.originalSize.w, h: meta.originalSize.h },
       displaySize: { w: meta.frameSize.w, h: meta.frameSize.h },
       textureSize: { ...meta.textureSize },
-      sizeMode: 0,
+      sizeMode: meta.sizeMode,
       isRotated: meta.isRotated,
     };
   } catch (e) {
@@ -102,6 +102,51 @@ const collectSpriteFrameSnapshot = (
     );
     return undefined;
   }
+};
+
+/** 从场景中找 Canvas 的 designResolution（2.x） */
+const collectDesignResolution = (
+  root: Cc2Node
+): { width: number; height: number } | undefined => {
+  const readFromComp = (
+    comp: unknown
+  ): { width: number; height: number } | undefined => {
+    const c = comp as {
+      __classname__?: string;
+      constructor?: { name?: string };
+      designResolution?: { width?: number; height?: number };
+      _designResolution?: { width?: number; height?: number };
+    };
+    const cn = c.__classname__ ?? c.constructor?.name ?? '';
+    if (!/Canvas/i.test(cn)) return undefined;
+    const dr = c.designResolution ?? c._designResolution;
+    const w = dr?.width ?? 0;
+    const h = dr?.height ?? 0;
+    if (w > 0 && h > 0) return { width: w, height: h };
+    return undefined;
+  };
+
+  const walk = (node: Cc2Node): { width: number; height: number } | undefined => {
+    for (const comp of node._components ?? []) {
+      const hit = readFromComp(comp);
+      if (hit) return hit;
+    }
+    try {
+      const Canvas = (window.cc as { Canvas?: unknown } | undefined)?.Canvas;
+      if (Canvas && typeof node.getComponent === 'function') {
+        const hit = readFromComp(node.getComponent(Canvas));
+        if (hit) return hit;
+      }
+    } catch {
+      /* ignore */
+    }
+    for (const child of getNodeChildren(node)) {
+      const hit = walk(child);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  return walk(root);
 };
 
 const countStats = (
@@ -192,6 +237,7 @@ export const exportSceneSnapshot = (
     labelCount: 0,
   };
   countStats(root, statsBase);
+  const designResolution = collectDesignResolution(scene);
 
   return {
     version: 1,
@@ -199,6 +245,7 @@ export const exportSceneSnapshot = (
     pageUrl: window.location.href,
     engineVersion: String(window.cc?.ENGINE_VERSION ?? '2.x'),
     engineFamily: '2',
+    designResolution,
     sceneName: getNodeName(scene) || 'Scene',
     stats: {
       ...statsBase,

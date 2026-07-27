@@ -1,19 +1,27 @@
 /**
  * 从快照节点解析 UITransform 尺寸（允许 0 宽/高，如 0×56、0×0）
+ * 兼容 2.x（path 用 /、英文组件行）与 3.x（›、中文行）
  */
+
+/** 统一 path 分隔符为 ` › `，兼容 `/` 与乱码 › */
+export const normalizeScenePath = (p) =>
+  String(p ?? '')
+    .replace(/\s*鈥\?\s*/g, ' › ')
+    .replace(/\s*鈥\uFFFD\s*/g, ' › ')
+    .replace(/\s*[›>／/]\s*/g, ' › ')
+    .replace(/\s*›\s*/g, ' › ')
+    .trim();
 
 /** 快照 path ↔ Creator 场景 path 候选（去 main/game_scene 等根前缀） */
 export const scenePathCandidates = (p) => {
   if (!p) return [];
   const out = new Set();
   const add = (s) => {
-    const t = String(s ?? '')
-      .replace(/\s*›\s*/g, ' › ')
-      .trim();
+    const t = normalizeScenePath(s);
     if (t) out.add(t);
   };
   add(p);
-  let s = String(p).replace(/^main › /i, '');
+  let s = normalizeScenePath(p).replace(/^main › /i, '');
   add(s);
   s = s.replace(/^game_scene › /i, '');
   add(s);
@@ -29,6 +37,13 @@ export const lookupPathMap = (pathMap, p) => {
     if (pathMap.has(k)) return pathMap.get(k);
   }
   return null;
+};
+
+/** 组件行：中英标签双认 */
+export const findCompRow = (rows, ...labels) => {
+  if (!rows?.length) return undefined;
+  const set = new Set(labels.map((l) => String(l).toLowerCase()));
+  return rows.find((r) => set.has(String(r.label ?? '').toLowerCase()));
 };
 
 export const parseSizePair = (value) => {
@@ -50,10 +65,10 @@ export const parseUiFromSnapshotNode = (ch) => {
   }
 
   const uiComp = (ch.components || []).find((c) => /UITransform/.test(c.typeName || ''));
-  const sizeRow = uiComp?.rows?.find((r) => r.label === '内容尺寸');
+  const sizeRow = findCompRow(uiComp?.rows, '内容尺寸', 'size', 'contentSize');
   const size = parseSizePair(sizeRow?.value);
   if (size && isValidUiSize(size.width, size.height)) {
-    const anchorRow = uiComp.rows?.find((r) => r.label === '锚点');
+    const anchorRow = findCompRow(uiComp.rows, '锚点', 'anchor', 'anchorPoint');
     let ax = 0.5;
     let ay = 0.5;
     if (anchorRow?.value) {
@@ -69,11 +84,11 @@ export const parseUiFromSnapshotNode = (ch) => {
   }
 
   const sp = (ch.components || []).find((c) => c.flags?.isSprite);
-  const sizeModeRow = sp?.rows?.find((r) => r.label === '尺寸模式');
+  const sizeModeRow = findCompRow(sp?.rows, '尺寸模式', 'sizeMode');
   const sizeMode = parseInt(String(sizeModeRow?.value ?? ''), 10);
   // CUSTOM(2) 必须用 UITransform，不能用图集纹理尺寸
   if (sp?.rows && sizeMode !== 2) {
-    const texRow = sp.rows.find((r) => r.label === '纹理');
+    const texRow = findCompRow(sp.rows, '纹理', '贴图', 'texture', 'spriteFrame');
     const texSize = parseSizePair(texRow?.value);
     if (texSize && isValidUiSize(texSize.width, texSize.height)) {
       return { contentSize: texSize, anchorPoint: { x: 0.5, y: 0.5 } };
@@ -88,7 +103,7 @@ export const parseSpriteSizeMode = (ch) => {
   if (sf != null && Number.isFinite(sf)) return sf;
 
   const sp = (ch.components || []).find((c) => c.flags?.isSprite);
-  const row = sp?.rows?.find((r) => r.label === '尺寸模式');
+  const row = findCompRow(sp?.rows, '尺寸模式', 'sizeMode');
   const v = parseInt(String(row?.value ?? ''), 10);
   return Number.isFinite(v) ? v : null;
 };

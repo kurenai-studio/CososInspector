@@ -42,7 +42,9 @@ const collectMaskTargets = (snapshotRoot, pathMap) => {
   const walk = (n) => {
     const maskComp = (n.components || []).find((c) => /Mask/.test(c.typeName || ''));
     if (maskComp) {
-      const typeRow = maskComp.rows?.find((r) => r.label === '类型');
+      const typeRow = maskComp.rows?.find(
+        (r) => r.label === '类型' || r.label === 'type' || r.label === '_type'
+      );
       const maskType = parseInt(String(typeRow?.value ?? '0'), 10);
       const paths = [n.path?.replace(/^main › /, ''), n.path].filter(Boolean);
       for (const p of paths) {

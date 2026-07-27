@@ -238,6 +238,17 @@ const safeFileStem = (nodeId, name) => {
 };
 
 const extractDesignResolution = (snapshot) => {
+  // 2.x 快照顶栏 designResolution 优先
+  const top = snapshot.designResolution;
+  if (top?.width > 0 && top?.height > 0) {
+    return {
+      width: top.width,
+      height: top.height,
+      canvasTransform: null,
+      source: 'snapshot.designResolution',
+    };
+  }
+
   const findCanvasHost = (node) => {
     if (!node) return null;
     if (node.name === 'Canvas') return node;
@@ -253,11 +264,35 @@ const extractDesignResolution = (snapshot) => {
     return null;
   };
   const canvas = findCanvasHost(snapshot.root) || findInTree(snapshot.root, 'Canvas');
+
+  // Canvas 组件行「设计分辨率」
+  const canvasComp = canvas?.components?.find((c) =>
+    /cc\.Canvas|^Canvas$/i.test(c.typeName || c.shortName || '')
+  );
+  const designRow = canvasComp?.rows?.find((r) =>
+    /设计分辨率|designResolution/i.test(String(r.label ?? ''))
+  );
+  if (designRow?.value) {
+    const m = String(designRow.value).match(
+      /(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/
+    );
+    if (m) {
+      return {
+        width: +m[1],
+        height: +m[2],
+        canvasTransform: canvas?.transform ?? null,
+        source: 'canvas.rows',
+      };
+    }
+  }
+
   let width = canvas?.uiTransform?.contentSize?.width;
   let height = canvas?.uiTransform?.contentSize?.height;
   if (!width || !height) {
     const uiComp = canvas?.components?.find((c) => /UITransform/.test(c.typeName || ''));
-    const sizeRow = uiComp?.rows?.find((r) => r.label === '内容尺寸');
+    const sizeRow = uiComp?.rows?.find(
+      (r) => r.label === '内容尺寸' || r.label === 'size'
+    );
     const m = String(sizeRow?.value ?? '').match(
       /(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)/
     );
@@ -270,6 +305,7 @@ const extractDesignResolution = (snapshot) => {
     width: width ?? 1280,
     height: height ?? 720,
     canvasTransform: canvas?.transform ?? null,
+    source: snapshot.engineFamily === '2' ? 'uiTransform|default(2.x)' : 'uiTransform|default',
   };
 };
 
@@ -636,8 +672,12 @@ function parseUiFromNode(ch) {
   if (ut && Number.isFinite(ut.width) && Number.isFinite(ut.height)) return ch.uiTransform;
   const uiComp = (ch.components || []).find((c) => /UITransform/.test(c.typeName || ''));
   if (uiComp?.rows) {
-    const sizeRow = uiComp.rows.find((r) => r.label === '内容尺寸');
-    const anchorRow = uiComp.rows.find((r) => r.label === '锚点');
+    const sizeRow = uiComp.rows.find((r) =>
+      r.label === '内容尺寸' || r.label === 'size' || r.label === 'contentSize'
+    );
+    const anchorRow = uiComp.rows.find((r) =>
+      r.label === '锚点' || r.label === 'anchor' || r.label === 'anchorPoint'
+    );
     const m = String(sizeRow?.value ?? '').match(/(\\d+(?:\\.\\d+)?)\\s*[×x]\\s*(\\d+(?:\\.\\d+)?)/);
     if (m) {
       let ax = 0.5;
@@ -653,10 +693,14 @@ function parseUiFromNode(ch) {
     }
   }
   const sp = (ch.components || []).find((c) => c.flags?.isSprite);
-  const sizeModeRow = sp?.rows?.find((r) => r.label === '尺寸模式');
+  const sizeModeRow = sp?.rows?.find((r) =>
+    r.label === '尺寸模式' || r.label === 'sizeMode'
+  );
   const sizeMode = parseInt(String(sizeModeRow?.value ?? ''), 10);
   if (sp?.rows && sizeMode !== 2) {
-    const texRow = sp.rows.find((r) => r.label === '纹理');
+    const texRow = sp.rows.find((r) =>
+      r.label === '纹理' || r.label === '贴图' || r.label === 'texture' || r.label === 'spriteFrame'
+    );
     const m = String(texRow?.value ?? '').match(/(\\d+(?:\\.\\d+)?)\\s*[×x]\\s*(\\d+(?:\\.\\d+)?)/);
     if (m) {
       return { contentSize: { width: +m[1], height: +m[2] }, anchorPoint: { x: 0.5, y: 0.5 } };
@@ -675,7 +719,7 @@ function parseSpriteSizeMode(ch) {
   }
   const sp = (ch.components || []).find((c) => c.flags?.isSprite);
   if (!sp?.rows) return null;
-  const row = sp.rows.find((r) => r.label === '尺寸模式');
+  const row = sp.rows.find((r) => r.label === '尺寸模式' || r.label === 'sizeMode');
   const v = parseInt(String(row?.value ?? ''), 10);
   return Number.isFinite(v) ? v : null;
 }
@@ -896,7 +940,9 @@ const collectMaskTargets = (snapshotRoot, pathMap) => {
   const walk = (n) => {
     const maskComp = (n.components || []).find((c) => /Mask/.test(c.typeName || ''));
     if (maskComp) {
-      const typeRow = maskComp.rows?.find((r) => r.label === '类型');
+      const typeRow = maskComp.rows?.find(
+        (r) => r.label === '类型' || r.label === 'type' || r.label === '_type'
+      );
       const maskType = parseInt(String(typeRow?.value ?? '0'), 10);
       const nodeUuid = lookupPathMap(pathMap, n.path);
       if (nodeUuid) {
@@ -966,7 +1012,9 @@ const main = async () => {
 
   const design = extractDesignResolution(snapshot);
   console.error(
-    `[scene-to-creator] 设计分辨率 ${design.width}x${design.height} page=${snapshot.pageUrl?.slice(0, 80)}…`
+    `[scene-to-creator] 设计分辨率 ${design.width}x${design.height}` +
+      ` engineFamily=${snapshot.engineFamily ?? '?'} source=${design.source ?? '?'}` +
+      ` page=${snapshot.pageUrl?.slice(0, 80)}…`
   );
 
   let textureResult = { manifest: {}, stats: { total: 0, ok: 0, fail: 0, uniqueFiles: 0 } };

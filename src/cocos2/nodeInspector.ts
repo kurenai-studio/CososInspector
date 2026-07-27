@@ -5,6 +5,7 @@ import {
   getSceneRoot,
   type Cc2Node,
 } from './sceneTree';
+import { mapCc2SizeModeToCc3 } from './spriteExtract';
 
 export interface InspectRow {
   label: string;
@@ -103,21 +104,37 @@ const inspectComponent = (comp: unknown): ComponentInspectInfo => {
     rows.push({ label, value: String(value) });
   };
 
-  // 常见 2.x 可渲染组件字段
+  // 常见 2.x 可渲染组件字段（中文标签对齐 3.x 解析器）
   const isSprite = /Sprite/i.test(shortName) && !/Spine|Skeleton/i.test(shortName);
   if (isSprite) {
     const frame = (c._spriteFrame ?? c.spriteFrame) as
       | { name?: string; _name?: string }
       | null
       | undefined;
+    const rawMode = c.sizeMode ?? c._sizeMode;
+    const sizeMode3 =
+      typeof rawMode === 'number' ? mapCc2SizeModeToCc3(rawMode) : rawMode;
+    push('贴图', frame?.name || frame?._name || '(frame)');
+    push('类型', c.type ?? c._type);
+    push('尺寸模式', sizeMode3);
     push('spriteFrame', frame?.name || frame?._name || '(frame)');
-    push('type', c.type ?? c._type);
-    push('sizeMode', c.sizeMode ?? c._sizeMode);
+    push('sizeMode', sizeMode3);
   }
   if (/Label/i.test(shortName)) {
     push('string', c.string ?? c._string);
     push('fontSize', c.fontSize ?? c._fontSize);
     push('lineHeight', c.lineHeight ?? c._lineHeight);
+  }
+  if (/Mask/i.test(shortName)) {
+    push('类型', c._type ?? c.type ?? 0);
+  }
+  if (/Canvas/i.test(shortName)) {
+    const dr = (c.designResolution ?? c._designResolution) as
+      | { width?: number; height?: number }
+      | undefined;
+    if (dr) {
+      push('设计分辨率', `${Math.round(dr.width ?? 0)}×${Math.round(dr.height ?? 0)}`);
+    }
   }
   if (/Widget/i.test(shortName)) {
     push('isAlignTop', c.isAlignTop ?? c._alignFlags);

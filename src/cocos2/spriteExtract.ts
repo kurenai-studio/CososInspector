@@ -40,15 +40,69 @@ type FrameLike = {
   _name?: string;
   getRect?: () => { x: number; y: number; width: number; height: number };
   getTexture?: () => TexLike | null;
+  getOffset?: () => { x?: number; y?: number } | null;
+  getOriginalSize?: () => { width?: number; height?: number } | null;
   isRotated?: (() => boolean) | boolean;
   _rect?: { x?: number; y?: number; width?: number; height?: number };
   _rotated?: boolean;
   _texture?: TexLike | null;
+  _offset?: { x?: number; y?: number };
+  offset?: { x?: number; y?: number };
+  _originalSize?: { width?: number; height?: number };
+  originalSize?: { width?: number; height?: number };
+};
+
+/**
+ * 2.x SizeMode：CUSTOM=0 TRIMMED=1 RAW=2
+ * 3.x SizeMode：TRIMMED=0 RAW=1 CUSTOM=2
+ * 快照统一写 3.x 枚举，便于 scene-to-creator 直接消费。
+ */
+export const mapCc2SizeModeToCc3 = (mode: number): number => {
+  if (mode === 0) return 2; // CUSTOM
+  if (mode === 1) return 0; // TRIMMED
+  if (mode === 2) return 1; // RAW
+  return 0;
+};
+
+const resolveOffset = (frame: FrameLike): { x: number; y: number } => {
+  try {
+    if (typeof frame.getOffset === 'function') {
+      const o = frame.getOffset();
+      if (o) return { x: o.x ?? 0, y: o.y ?? 0 };
+    }
+  } catch {
+    /* ignore */
+  }
+  const o = frame.offset ?? frame._offset;
+  return { x: o?.x ?? 0, y: o?.y ?? 0 };
+};
+
+const resolveOriginalSize = (
+  frame: FrameLike,
+  fallback: { w: number; h: number }
+): { w: number; h: number } => {
+  try {
+    if (typeof frame.getOriginalSize === 'function') {
+      const s = frame.getOriginalSize();
+      if (s && (s.width ?? 0) > 0 && (s.height ?? 0) > 0) {
+        return { w: Math.floor(s.width!), h: Math.floor(s.height!) };
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  const s = frame.originalSize ?? frame._originalSize;
+  if (s && (s.width ?? 0) > 0 && (s.height ?? 0) > 0) {
+    return { w: Math.floor(s.width!), h: Math.floor(s.height!) };
+  }
+  return fallback;
 };
 
 type SpriteComp = {
   enabled?: boolean;
   _enabled?: boolean;
+  sizeMode?: number;
+  _sizeMode?: number;
   spriteFrame?: FrameLike | null;
   _spriteFrame?: FrameLike | null;
 };
@@ -237,6 +291,10 @@ export function collectSpriteFrameMeta(nodeId: string): {
   isRotated: boolean;
   textureSize: { w: number; h: number };
   frameSize: { w: number; h: number };
+  originalSize: { w: number; h: number };
+  offset: { x: number; y: number };
+  /** 已映射为 3.x SizeMode */
+  sizeMode: number;
   enabled: boolean;
 } | null {
   const scene = getSceneRoot();
@@ -253,6 +311,13 @@ export function collectSpriteFrameMeta(nodeId: string): {
   const tex = resolveTexture(frame);
   const outW = rotated ? rect.h : rect.w;
   const outH = rotated ? rect.w : rect.h;
+  const frameSize = { w: outW, h: outH };
+  const rawMode =
+    typeof comp.sizeMode === 'number'
+      ? comp.sizeMode
+      : typeof comp._sizeMode === 'number'
+        ? comp._sizeMode
+        : 0;
   const enabled =
     typeof comp.enabled === 'boolean'
       ? comp.enabled
@@ -267,7 +332,10 @@ export function collectSpriteFrameMeta(nodeId: string): {
       w: Math.floor(tex?.width ?? 0),
       h: Math.floor(tex?.height ?? 0),
     },
-    frameSize: { w: outW, h: outH },
+    frameSize,
+    originalSize: resolveOriginalSize(frame, frameSize),
+    offset: resolveOffset(frame),
+    sizeMode: mapCc2SizeModeToCc3(rawMode),
     enabled,
   };
 }

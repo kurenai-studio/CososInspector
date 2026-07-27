@@ -98,5 +98,7 @@ node tools/mcp-cocos-inspector/repair-scene-all.mjs `
 
 - `tools/mcp-cocos-inspector/scene-to-creator.mjs`
 - `tools/mcp-cocos-inspector/scene-patch-disk.mjs`
+- `tools/mcp-cocos-inspector/scene-snapshot-parse.mjs`
 - `src/cocos3/sceneSnapshot.ts`、`spriteDownload.ts`
-- `docs/features/scene-recovery.md`（详细参数与坑）
+- `src/cocos2/sceneSnapshot.ts`、`mcpBridge.ts`（2.x → 3.x 复刻读侧）
+- `docs/features/scene-recovery.md`、`docs/features/cocos2-support.md`

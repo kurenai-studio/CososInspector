@@ -60,6 +60,8 @@ export interface SceneSnapshot {
   engineVersion: string;
   /** 引擎大系：2.x / 3.x（可选，旧快照可能缺失） */
   engineFamily?: '2' | '3';
+  /** Canvas 设计分辨率（2.x 优先从此字段读取） */
+  designResolution?: { width: number; height: number };
   sceneName: string;
   stats: {
     nodeCount: number;
