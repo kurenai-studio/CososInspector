@@ -39,7 +39,13 @@ import {
   showNodeBoundsByPath,
   showNodeBoundsOverlay,
 } from './nodeBoundsOverlay';
-import { uploadPngBase64ToShare } from './shareUpload';
+import { uploadPngBase64ToShare, uploadBlobToShare } from './shareUpload';
+import {
+  exportSpineFromNode,
+} from './spineExport';
+import {
+  exportBmfontFromNode,
+} from './bmfontExport';
 import {
   clearTextureExtractLogs,
   getTextureExtractLogs,
@@ -365,6 +371,135 @@ export const cocosInspectorMcpApi = {
     }
   ): Promise<TextureDownloadResult> {
     return buildTextureDownload(nodeId, options);
+  },
+
+  async downloadSpine(
+    nodeId: string,
+    options?: {
+      spineIndex?: number;
+      delivery?: TextureDownloadDelivery;
+      wsPort?: number;
+    }
+  ): Promise<
+    | {
+        ok: true;
+        delivery: 'share';
+        sharePath: string;
+        shareUrl: string;
+        zipName: string;
+        skeletonDataName: string | null;
+        fileCount: number;
+      }
+    | {
+        ok: true;
+        delivery: 'inline';
+        base64: string;
+        zipName: string;
+        skeletonDataName: string | null;
+        fileCount: number;
+      }
+    | { ok: false; error: string }
+  > {
+    const exported = await exportSpineFromNode(nodeId, options?.spineIndex ?? 0);
+    if (!exported.ok || !exported.zipBlob) {
+      return { ok: false, error: exported.error ?? 'Spine 导出失败' };
+    }
+    const skName =
+      (exported.log
+        .find((l) => l.includes('SkeletonData'))
+        ?.match(/SkeletonData\s+(\S+)/) ?? [])[1] ?? null;
+    const delivery = options?.delivery ?? 'share';
+    if (delivery === 'inline') {
+      const buf = await exported.zipBlob.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]!);
+      return {
+        ok: true,
+        delivery: 'inline',
+        base64: btoa(binary),
+        zipName: exported.zipName,
+        skeletonDataName: skName,
+        fileCount: exported.files.length,
+      };
+    }
+    const uploaded = await uploadBlobToShare(
+      exported.zipBlob,
+      exported.zipName,
+      options?.wsPort ?? 17373
+    );
+    if (!uploaded.ok) return { ok: false, error: uploaded.error };
+    return {
+      ok: true,
+      delivery: 'share',
+      sharePath: uploaded.sharePath,
+      shareUrl: uploaded.shareUrl,
+      zipName: exported.zipName,
+      skeletonDataName: skName,
+      fileCount: exported.files.length,
+    };
+  },
+
+  async downloadBmfont(
+    nodeId: string,
+    options?: {
+      bmfontIndex?: number;
+      delivery?: TextureDownloadDelivery;
+      wsPort?: number;
+    }
+  ): Promise<
+    | {
+        ok: true;
+        delivery: 'share';
+        sharePath: string;
+        shareUrl: string;
+        zipName: string;
+        fileCount: number;
+      }
+    | {
+        ok: true;
+        delivery: 'inline';
+        base64: string;
+        zipName: string;
+        fileCount: number;
+      }
+    | { ok: false; error: string }
+  > {
+    const exported = await exportBmfontFromNode(
+      nodeId,
+      options?.bmfontIndex ?? 0
+    );
+    if (!exported.ok || !exported.zipBlob) {
+      return { ok: false, error: exported.error ?? 'BMFont 导出失败' };
+    }
+    const delivery = options?.delivery ?? 'share';
+    if (delivery === 'inline') {
+      const buf = await exported.zipBlob.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]!);
+      return {
+        ok: true,
+        delivery: 'inline',
+        base64: btoa(binary),
+        zipName: exported.zipName,
+        fileCount: exported.files.length,
+      };
+    }
+    const uploaded = await uploadBlobToShare(
+      exported.zipBlob,
+      exported.zipName,
+      options?.wsPort ?? 17373
+    );
+    if (!uploaded.ok) return { ok: false, error: uploaded.error };
+    return {
+      ok: true,
+      delivery: 'share',
+      sharePath: uploaded.sharePath,
+      shareUrl: uploaded.shareUrl,
+      zipName: exported.zipName,
+      fileCount: exported.files.length,
+    };
   },
 
   getTextureExtractLogs(options?: {

@@ -157,11 +157,17 @@ npm run cocos-scene-to-creator -- tmp/godeebxp-scene-snapshot.json `
 | E | Creator 2.x 快照 → 3.x 复刻（P3a） | ✅ 路径/sizeMode/设计分辨率/Camera |
 | F | Label / Widget / Spine 占位（P3b） | ✅ 文本与对齐可还原；Spine 无骨架资源 |
 | G | 2.x Spine/BMFont zip 导出（P4a） | ✅ 面板导出；手动拖入 Creator |
+| H | Spine/BMFont 自动绑入（P4b） | ✅ `--with-spine-fonts` |
 
-### P4a（Spine / BMFont 导出）
+### P4b（自动绑 Spine / BMFont）
 
-2.x Inspector 可导出与 3.x 同布局的 zip（`src/cocos2/spineExport.ts` / `bmfontExport.ts`）。  
-**不**自动写入 Creator；用 `npm run unpack-spine` 或拖入 assets。
+```powershell
+npm run cocos-scene-to-creator -- <snapshot.json> `
+  --clear --with-textures --with-spine-fonts `
+  --project … --scene assets/scene/xxx_recovered.scene
+```
+
+资源目录：`assets/recovered/<assetKey>/spine|bmfont/`。关闭场景不保存后重开查看绑定。
 
 详见 [cocos2-support.md](cocos2-support.md)。
 

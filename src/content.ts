@@ -3,6 +3,8 @@
 const DEFAULT_API_CALL_TIMEOUT_MS = 120_000;
 const API_CALL_TIMEOUT_BY_METHOD: Record<string, number> = {
   downloadTexture: 300_000,
+  downloadSpine: 300_000,
+  downloadBmfont: 180_000,
   listSprites: 180_000,
   exportSceneSnapshot: 300_000,
 };

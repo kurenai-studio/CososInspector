@@ -59,7 +59,8 @@ npm run cocos-scene-to-creator -- tmp/<game>-scene-snapshot.json `
   --max-nodes 5000 --max-sprites 600
 ```
 
-仅纹理：`--textures-only --force-textures`；仅绑定：`--skip-textures`。
+仅纹理：`--textures-only --force-textures`；仅绑定：`--skip-textures`。  
+Spine/BMFont 自动迁入：加 `--with-spine-fonts`（落地 `assets/recovered/<key>/spine|bmfont/`）。
 
 ## P 侧：Creator 重建与补丁
 

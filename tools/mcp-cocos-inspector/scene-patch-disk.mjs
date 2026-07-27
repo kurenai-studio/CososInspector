@@ -8,6 +8,20 @@ export function spriteFrameRef(uuid) {
   };
 }
 
+export function skeletonDataRef(uuid) {
+  return {
+    __uuid__: uuid,
+    __expectedType__: 'sp.SkeletonData',
+  };
+}
+
+export function bitmapFontRef(uuid) {
+  return {
+    __uuid__: uuid,
+    __expectedType__: 'cc.BitmapFont',
+  };
+}
+
 function indexScene(scene) {
   const byId = new Map();
   scene.forEach((obj, idx) => {
@@ -55,6 +69,58 @@ export function patchSpriteFramesOnDisk(sceneAbs, bindings) {
 
   fs.writeFileSync(sceneAbs, `${JSON.stringify(scene, null, 2)}\n`, 'utf8');
   return { patched, sizeModePatched };
+}
+
+/** 磁盘写入 sp.Skeleton.skeletonData */
+export function patchSkeletonDataOnDisk(sceneAbs, bindings) {
+  if (!bindings?.length) return { patched: 0 };
+  const scene = JSON.parse(fs.readFileSync(sceneAbs, 'utf8'));
+  const byId = indexScene(scene);
+  const nodeByUuid = new Map();
+  for (const obj of scene) {
+    if (obj.__type__ === 'cc.Node' && obj._id) nodeByUuid.set(obj._id, obj);
+  }
+  let patched = 0;
+  for (const b of bindings) {
+    if (!b.skelUuid) continue;
+    const node = nodeByUuid.get(b.nodeUuid);
+    if (!node?._components) continue;
+    for (const cref of node._components) {
+      const comp = byId.get(cref.__id__);
+      if (comp?.__type__ === 'sp.Skeleton') {
+        comp._skeletonData = skeletonDataRef(b.skelUuid);
+        patched += 1;
+      }
+    }
+  }
+  fs.writeFileSync(sceneAbs, `${JSON.stringify(scene, null, 2)}\n`, 'utf8');
+  return { patched };
+}
+
+/** 磁盘写入 cc.Label.font（BitmapFont） */
+export function patchBitmapFontOnDisk(sceneAbs, bindings) {
+  if (!bindings?.length) return { patched: 0 };
+  const scene = JSON.parse(fs.readFileSync(sceneAbs, 'utf8'));
+  const byId = indexScene(scene);
+  const nodeByUuid = new Map();
+  for (const obj of scene) {
+    if (obj.__type__ === 'cc.Node' && obj._id) nodeByUuid.set(obj._id, obj);
+  }
+  let patched = 0;
+  for (const b of bindings) {
+    if (!b.fontUuid) continue;
+    const node = nodeByUuid.get(b.nodeUuid);
+    if (!node?._components) continue;
+    for (const cref of node._components) {
+      const comp = byId.get(cref.__id__);
+      if (comp?.__type__ === 'cc.Label') {
+        comp._font = bitmapFontRef(b.fontUuid);
+        patched += 1;
+      }
+    }
+  }
+  fs.writeFileSync(sceneAbs, `${JSON.stringify(scene, null, 2)}\n`, 'utf8');
+  return { patched };
 }
 
 /** 补丁 UITransform contentSize（set-property 可能未落盘） */

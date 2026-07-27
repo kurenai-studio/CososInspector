@@ -32,8 +32,10 @@ import { resolveSharePath, setShareContext, getShareDir } from './shared-fs.mjs'
 import {
   buildBindingsFromManifest,
   buildPathToNodeUuidMap,
+  patchBitmapFontOnDisk,
   patchCanvasCameraOnDisk,
   patchMasksOnDisk,
+  patchSkeletonDataOnDisk,
   patchSpriteFramesOnDisk,
   patchUiSizesOnDisk,
   resetAllSpriteMetaFromManifest,
@@ -47,6 +49,7 @@ import {
   parseSpriteSizeMode,
   parseUiFromSnapshotNode,
 } from './scene-snapshot-parse.mjs';
+import { exportSpineBmfontAssets } from './spine-bmfont-recovery.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -72,11 +75,14 @@ const parseArgs = () => {
     maxSprites: Number(get('--max-sprites', '600')),
     clear: has('--clear'),
     withTextures: has('--with-textures'),
+    withSpineFonts: has('--with-spine-fonts'),
     refreshSnapshot: has('--refresh-snapshot'),
     skipTextures: has('--skip-textures'),
     resumeTextures: has('--resume-textures'),
     texturesOnly: has('--textures-only'),
     forceTextures: has('--force-textures'),
+    maxSpines: Number(get('--max-spines', '50')),
+    maxBmfonts: Number(get('--max-bmfonts', '50')),
     manifestPath: get('--manifest', ''),
     liveSpritesPath: get('--live-sprites', ''),
   };
@@ -541,11 +547,15 @@ const loadManifest = (manifestPath) => {
   return { manifest: raw.manifest ?? {}, stats: raw.stats ?? {} };
 };
 
-const buildCreatorScript = (snapshot, sceneUrl, design, manifest, maxNodes, assetKey) => {
+const buildCreatorScript = (snapshot, sceneUrl, design, manifest, maxNodes, assetKey, spineManifest, bmfontManifest) => {
   const rootPayload = JSON.stringify(snapshot.root);
   const manifestPayload = JSON.stringify(manifest);
+  const spinePayload = JSON.stringify(spineManifest ?? {});
+  const bmfontPayload = JSON.stringify(bmfontManifest ?? {});
   const designPayload = JSON.stringify(design);
   const spritesDb = `db://assets/recovered/${assetKey || 'godeebxp'}/sprites`;
+  const spineDb = `db://assets/recovered/${assetKey || 'godeebxp'}/spine`;
+  const bmfontDb = `db://assets/recovered/${assetKey || 'godeebxp'}/bmfont`;
 
   return `
 const sceneUrl = ${JSON.stringify(sceneUrl)};
@@ -553,10 +563,15 @@ const sceneRel = sceneUrl.replace(/^db:\\/\\//, '');
 const maxNodes = ${maxNodes};
 const rootData = ${rootPayload};
 const textureManifest = ${manifestPayload};
+const spineManifest = ${spinePayload};
+const bmfontManifest = ${bmfontPayload};
 const design = ${designPayload};
 
 await Editor.Message.request('asset-db', 'refresh-asset', sceneUrl);
 await Editor.Message.request('asset-db', 'refresh-asset', ${JSON.stringify(spritesDb)});
+try { await Editor.Message.request('asset-db', 'refresh-asset', ${JSON.stringify(spineDb)}); } catch (_) {}
+try { await Editor.Message.request('asset-db', 'refresh-asset', ${JSON.stringify(bmfontDb)}); } catch (_) {}
+await new Promise((r) => setTimeout(r, 800));
 let sceneInfo = await Editor.Message.request('asset-db', 'query-asset-info', sceneUrl);
 if (!sceneInfo?.uuid) {
   sceneInfo = await Editor.Message.request('asset-db', 'query-asset-info', sceneRel);
@@ -599,6 +614,7 @@ for (const u of removeList) {
 tree = await Editor.Message.request('scene', 'query-node-tree');
 
 const sfUuidCache = {};
+const assetUuidCache = {};
 async function resolveSpriteFrame(dbUrl) {
   if (sfUuidCache[dbUrl]) return sfUuidCache[dbUrl];
   await Editor.Message.request('asset-db', 'refresh-asset', dbUrl);
@@ -607,6 +623,17 @@ async function resolveSpriteFrame(dbUrl) {
   if (!sub) throw new Error('no spriteFrame subAsset: ' + dbUrl);
   sfUuidCache[dbUrl] = sub;
   return sub;
+}
+
+async function resolveAssetUuid(dbUrl) {
+  if (assetUuidCache[dbUrl]) return assetUuidCache[dbUrl];
+  try {
+    await Editor.Message.request('asset-db', 'refresh-asset', dbUrl);
+  } catch (_) {}
+  const info = await Editor.Message.request('asset-db', 'query-asset-info', dbUrl);
+  if (!info?.uuid) throw new Error('asset uuid 缺失: ' + dbUrl);
+  assetUuidCache[dbUrl] = info.uuid;
+  return info.uuid;
 }
 
 async function queryHasComponent(nodeUuid, compPath) {
@@ -844,6 +871,18 @@ async function applyLabel(nodeUuid, ch) {
       });
     } catch (_) {}
   }
+  const fontEntry = bmfontManifest[ch.id];
+  if (fontEntry?.dbUrl) {
+    try {
+      const fontUuid = await resolveAssetUuid(fontEntry.dbUrl);
+      await Editor.Message.request('scene', 'set-property', {
+        uuid: nodeUuid,
+        path: 'cc.Label.font',
+        dump: { type: 'cc.BitmapFont', value: { uuid: fontUuid } },
+      });
+      labelFontBindings.push({ nodeUuid, fontUuid, path: ch.path || ch.name });
+    } catch (_) {}
+  }
   return true;
 }
 
@@ -884,13 +923,25 @@ async function applyWidget(nodeUuid, ch) {
 
 async function applySpinePlaceholder(nodeUuid, ch) {
   const sp = parseSpineFromNode(ch);
-  if (!sp) return false;
+  if (!sp && !spineManifest[ch.id]) return false;
   try {
     await ensureComponent(nodeUuid, 'sp.Skeleton');
   } catch (_) {
     return false;
   }
-  if (sp.animation) {
+  const entry = spineManifest[ch.id];
+  if (entry?.dbUrl) {
+    try {
+      const skelUuid = await resolveAssetUuid(entry.dbUrl);
+      await Editor.Message.request('scene', 'set-property', {
+        uuid: nodeUuid,
+        path: 'sp.Skeleton.skeletonData',
+        dump: { type: 'sp.SkeletonData', value: { uuid: skelUuid } },
+      });
+      spineBindings.push({ nodeUuid, skelUuid, path: ch.path || ch.name });
+    } catch (_) {}
+  }
+  if (sp?.animation) {
     try {
       await Editor.Message.request('scene', 'set-property', {
         uuid: nodeUuid,
@@ -991,6 +1042,8 @@ const uiSizeBindings = [];
 const labelsApplied = [];
 const widgetsApplied = [];
 const spinesApplied = [];
+const spineBindings = [];
+const labelFontBindings = [];
 let count = 0;
 
 async function walk(src, parentUuid, depth) {
@@ -1100,6 +1153,8 @@ return {
   labelsAppliedCount: labelsApplied.length,
   widgetsAppliedCount: widgetsApplied.length,
   spinesAppliedCount: spinesApplied.length,
+  spineBindings,
+  labelFontBindings,
   spriteBindings,
   uiSizeBindings,
   createdSample: created.slice(0, 15),
@@ -1183,7 +1238,11 @@ const main = async () => {
   await connectBridgeClientOnly(args.wsPort);
   console.error(`[scene-to-creator] Inspector WS 客户端 ws://127.0.0.1:${args.wsPort}`);
 
-  if (args.refreshSnapshot || (args.withTextures && !args.skipTextures)) {
+  if (
+    args.refreshSnapshot ||
+    (args.withTextures && !args.skipTextures) ||
+    args.withSpineFonts
+  ) {
     console.error(
       `[scene-to-creator] 等待试玩页扩展连接桥接（请在 ${args.pageUrlMatch || '试玩'} 页 F5 刷新）…`
     );
@@ -1235,6 +1294,27 @@ const main = async () => {
     console.error('[scene-to-creator] 复用 manifest', textureResult.stats);
   }
 
+  let spineBm = {
+    spineManifest: {},
+    bmfontManifest: {},
+    stats: { spineOk: 0, spineFail: 0, bmOk: 0, bmFail: 0, spineUnique: 0, bmUnique: 0 },
+  };
+  if (args.withSpineFonts) {
+    console.error('[scene-to-creator] 导出 Spine/BMFont 到工程目录…');
+    spineBm = await exportSpineBmfontAssets(snapshot, args, inspectorCall);
+    const spineManPath = path.resolve(
+      path.dirname(snapAbs),
+      `${args.assetKey}-spine-manifest.json`
+    );
+    const bmManPath = path.resolve(
+      path.dirname(snapAbs),
+      `${args.assetKey}-bmfont-manifest.json`
+    );
+    saveManifest(spineManPath, spineBm.spineManifest, spineBm.stats);
+    saveManifest(bmManPath, spineBm.bmfontManifest, spineBm.stats);
+    console.error('[scene-to-creator] Spine/BMFont 统计', spineBm.stats);
+  }
+
   const sceneUrl = args.sceneRel.startsWith('db://')
     ? args.sceneRel
     : `db://${args.sceneRel.replace(/\\/g, '/')}`;
@@ -1253,7 +1333,9 @@ const main = async () => {
     design,
     textureResult.manifest,
     args.maxNodes,
-    args.assetKey
+    args.assetKey,
+    spineBm.spineManifest,
+    spineBm.bmfontManifest
   );
 
   console.error('[scene-to-creator] Creator 重建节点树…');
@@ -1294,7 +1376,6 @@ const main = async () => {
       design.width
     );
     const metaReset = resetAllSpriteMetaFromManifest(args.project, textureResult.manifest);
-    // 勿 refresh-asset：会触发 Creator 对 PNG 重新 auto-trim，破坏 originalCanvas 全图 meta
     console.error('[scene-to-creator] 纹理 .meta 最终重置', metaReset);
     console.error('[scene-to-creator] 磁盘补丁完成。请关闭场景(不保存)后重新打开');
     diskPatch = { bindings: bindings.length, sfPatch, uiPatch, maskPatch, camPatch, metaReset };
@@ -1307,6 +1388,55 @@ const main = async () => {
     }
   }
 
+  if (args.withSpineFonts) {
+    // Creator 导入后重读 .meta uuid
+    for (const e of Object.values(spineBm.spineManifest)) {
+      if (e.primaryAbs) e.skelUuid = e.skelUuid || (() => {
+        try {
+          const meta = JSON.parse(fs.readFileSync(`${e.primaryAbs}.meta`, 'utf8'));
+          return meta.uuid ?? null;
+        } catch {
+          return null;
+        }
+      })();
+    }
+    for (const e of Object.values(spineBm.bmfontManifest)) {
+      if (e.primaryAbs) e.fontUuid = e.fontUuid || (() => {
+        try {
+          const meta = JSON.parse(fs.readFileSync(`${e.primaryAbs}.meta`, 'utf8'));
+          return meta.uuid ?? null;
+        } catch {
+          return null;
+        }
+      })();
+    }
+    const pathMapOnce = buildPathToNodeUuidMap(disk.abs);
+    const spineBind =
+      result.spineBindings?.length > 0
+        ? result.spineBindings
+        : Object.values(spineBm.spineManifest)
+            .map((e) => {
+              const nodeUuid = lookupPathMap(pathMapOnce, e.nodePath);
+              if (!nodeUuid || !e.skelUuid) return null;
+              return { nodeUuid, skelUuid: e.skelUuid };
+            })
+            .filter(Boolean);
+    const fontBind =
+      result.labelFontBindings?.length > 0
+        ? result.labelFontBindings
+        : Object.values(spineBm.bmfontManifest)
+            .map((e) => {
+              const nodeUuid = lookupPathMap(pathMapOnce, e.nodePath);
+              if (!nodeUuid || !e.fontUuid) return null;
+              return { nodeUuid, fontUuid: e.fontUuid };
+            })
+            .filter(Boolean);
+    const skPatch = patchSkeletonDataOnDisk(disk.abs, spineBind);
+    const fontPatch = patchBitmapFontOnDisk(disk.abs, fontBind);
+    diskPatch = { ...(diskPatch || {}), skPatch, fontPatch };
+    console.error('[scene-to-creator] Spine/BMFont 磁盘补丁', { skPatch, fontPatch });
+  }
+
   console.log(
     JSON.stringify(
       {
@@ -1317,6 +1447,7 @@ const main = async () => {
         sceneReset: args.clear || disk.created,
         design,
         textures: textureResult.stats,
+        spineBmfont: spineBm.stats,
         diskPatch,
         ...result,
       },

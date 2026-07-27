@@ -17,7 +17,7 @@
 
 | 文档 | 说明 |
 |------|------|
-| [cocos2-support.md](features/cocos2-support.md) | Creator 2.x（含 2.4）P0–P4a 支持 |
+| [cocos2-support.md](features/cocos2-support.md) | Creator 2.x（含 2.4）P0–P4b 支持 |
 | [scene-recovery.md](features/scene-recovery.md) | Inspector → Creator 场景恢复（详细） |
 | [inspector-mcp-multi-instance.md](features/inspector-mcp-multi-instance.md) | 多试玩域 MCP 桥接 |
 | [node-tree.md](features/node-tree.md) | 节点树、Inspector 面板、位置显示 |
