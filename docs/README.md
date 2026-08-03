@@ -1,7 +1,7 @@
 # Cocos Inspector 3 文档索引
 
 当前主能力：**试玩页场景读取（S）+ Creator 场景复刻（P）+ MCP 自动化**。  
-**v3.1.1**：回退扩展内 HAR 录制（刷新会卸掉 Inspector，方案不可用）；保留 UTF-8 构建校验。同一扩展支持 Creator **3.x + 2.x（含 2.4）**。
+**v3.2.0**：同一扩展支持 Creator **3.x + 2.x（含 2.4）**，以及无 Cocos 时的 **PixiJS MVP**（stage 树 / sprite / 截图 / 暂停 + MCP）。
 
 ## Agent Skills（本仓库）
 
@@ -19,6 +19,7 @@
 | 文档 | 说明 |
 |------|------|
 | [cocos2-support.md](features/cocos2-support.md) | Creator 2.x（含 2.4）P0–P8a 支持 |
+| [pixi-support.md](features/pixi-support.md) | PixiJS MVP（stage / MCP / 截图） |
 | [scene-recovery.md](features/scene-recovery.md) | Inspector → Creator 场景恢复（详细） |
 | [inspector-mcp-multi-instance.md](features/inspector-mcp-multi-instance.md) | 多试玩域 MCP 桥接 |
 | [node-tree.md](features/node-tree.md) | 节点树、Inspector 面板、位置显示 |
@@ -41,4 +42,4 @@
 - `features/hooks.md`、`inspector.md`、`performance.md`、`ui-controls.md` — 2.x 已移除能力，仅作参考
 - `fastspin-analysis/` — FastSpin 逆向（`archive/legacy-main` 时代产物）
 
-实现代码：`src/cocos3/`、`tools/mcp-cocos-inspector/`。根目录 [README.md](../README.md) 含构建安装说明。
+实现代码：`src/cocos3/`、`src/cocos2/`、`src/pixi/`、`tools/mcp-cocos-inspector/`。根目录 [README.md](../README.md) 含构建安装说明。

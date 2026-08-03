@@ -43,6 +43,7 @@ async function build() {
         content: join(root, 'src/content.ts'),
         injected: join(root, 'src/injected.ts'),
         background: join(root, 'src/background.ts'),
+        'pixi-probe': join(root, 'src/pixi/earlyProbe.entry.ts'),
       },
       outdir: dist,
     });
@@ -62,6 +63,7 @@ async function build() {
       ['content', 'src/content.ts'],
       ['injected', 'src/injected.ts'],
       ['background', 'src/background.ts'],
+      ['pixi-probe', 'src/pixi/earlyProbe.entry.ts'],
     ]) {
       const r = spawnSync(
         'npx',

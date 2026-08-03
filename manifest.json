@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Cocos Inspector 3",
-  "version": "3.1.1",
-  "description": "Cocos Creator 3.x / 2.x 场景节点树查看",
+  "version": "3.2.0",
+  "description": "Cocos Creator 3.x / 2.x / PixiJS 场景节点树查看",
   "permissions": ["activeTab", "scripting", "tabs"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "background": {
@@ -12,12 +12,14 @@
     {
       "matches": ["<all_urls>"],
       "js": ["dist/content.js"],
-      "css": ["dist/inspector.css"]
+      "css": ["dist/inspector.css"],
+      "run_at": "document_start",
+      "all_frames": true
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["dist/injected.js", "dist/inspector.css"],
+      "resources": ["dist/injected.js", "dist/inspector.css", "dist/pixi-probe.js"],
       "matches": ["<all_urls>"]
     }
   ]

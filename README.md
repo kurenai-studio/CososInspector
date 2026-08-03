@@ -1,9 +1,10 @@
 # Cocos Inspector 3
 
-面向 **Cocos Creator 3.x** 与 **2.x（含 2.4，P0）** 的 Chrome 扩展 + MCP：在浏览器试玩页查看场景、导出快照与纹理，并配合 **cocos-meta-mcp** 在 Creator 中复刻场景。
+面向 **Cocos Creator 3.x**、**2.x（含 2.4）** 与 **PixiJS（MVP）** 的 Chrome 扩展 + MCP：在浏览器试玩页查看场景、导出快照与纹理，并配合 **cocos-meta-mcp** 在 Creator 中复刻场景。
 
 > 3.x：完整能力（树 / Inspector / 纹理 / MCP / 复刻）。  
-> 2.x：P0 节点树+暂停，P1 Sprite 贴图预览/下载，详见 [docs/features/cocos2-support.md](docs/features/cocos2-support.md)。
+> 2.x：P0 节点树+暂停，P1 Sprite 贴图预览/下载，详见 [docs/features/cocos2-support.md](docs/features/cocos2-support.md)。  
+> Pixi：stage 树 / sprite 列表 / 截图 / ticker 暂停 + MCP，详见 [docs/features/pixi-support.md](docs/features/pixi-support.md)。
 
 ## 功能
 

@@ -8,8 +8,12 @@ import { installMcpBridge } from './cocos3/mcpBridge';
 import { startCocosInspector2 } from './cocos2/panel';
 import {
   detectEngineFamily,
+  logEngine,
   waitForEngine,
 } from './engine/detect';
+import { whenDomReady } from './engine/mount';
+import { startPixiInspector } from './pixi/panel';
+import { installPixiConsoleHint } from './pixi/runtime';
 import {
   collectNodeInspectorData,
   createNodeInspectorElement,
@@ -788,18 +792,27 @@ class CocosInspector3 {
 }
 
 function bootInspector(): void {
-  const family = detectEngineFamily();
-  if (family === '3') {
-    new CocosInspector3();
-    return;
-  }
-  if (family === '2') {
-    startCocosInspector2();
-    return;
-  }
-  waitForEngine((ready) => {
-    if (ready === '3') new CocosInspector3();
-    else startCocosInspector2();
+  // 尽早挂钩，捕获打包页「PixiJS Deprecation」等软信号
+  installPixiConsoleHint();
+
+  const start = (family: '2' | '3' | 'pixi'): void => {
+    try {
+      logEngine(`准备启动面板 engineFamily=${family}`);
+      if (family === '3') new CocosInspector3();
+      else if (family === '2') startCocosInspector2();
+      else startPixiInspector();
+    } catch (e) {
+      console.error(`[Cocos Inspector] 启动 ${family} 面板失败`, e);
+    }
+  };
+
+  whenDomReady(() => {
+    const family = detectEngineFamily();
+    if (family) {
+      start(family);
+      return;
+    }
+    waitForEngine((ready) => start(ready));
   });
 }
 
