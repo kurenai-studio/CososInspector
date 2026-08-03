@@ -1,6 +1,11 @@
 /// <reference path="./types/chrome.d.ts" />
 
 import { EARLY_PIXI_PROBE_SOURCE } from './pixi/earlyProbeSource';
+import {
+  PIXI_ENABLED_DEFAULT,
+  PIXI_ENABLED_STORAGE_KEY,
+  isKnownPixiHost,
+} from './pixi/settings';
 
 const DEFAULT_API_CALL_TIMEOUT_MS = 120_000;
 const API_CALL_TIMEOUT_BY_METHOD: Record<string, number> = {
@@ -21,23 +26,42 @@ function markPageApiReady(): void {
   pageApiReady = true;
 }
 
-/**
- * 同步探针：赶在游戏 bind(console.warn) / new Application 之前。
- */
-function injectEarlyPixiProbe(): void {
+function injectInlineMainWorld(source: string): void {
   const probe = document.createElement('script');
-  probe.textContent = EARLY_PIXI_PROBE_SOURCE;
+  probe.textContent = source;
   const parent = document.documentElement || document.head || document.body;
   if (!parent) return;
   parent.appendChild(probe);
   probe.remove();
 }
 
-function injectResources(): void {
-  console.log('Injecting Cocos Inspector resources...');
-  // 1) 同步 inline（若 CSP 允许）— 最早
-  injectEarlyPixiProbe();
+/** 同步探针：赶在游戏 bind(console.warn) / new Application 之前。 */
+function injectEarlyPixiProbe(): void {
+  injectInlineMainWorld(EARLY_PIXI_PROBE_SOURCE);
+}
 
+function injectPixiEnabledFlag(enabled: boolean): void {
+  injectInlineMainWorld(
+    `window.__cocosInspectorPixiEnabled=${enabled ? 'true' : 'false'};`
+  );
+}
+
+function shouldInjectPixiProbe(enabled: boolean): boolean {
+  if (!enabled) return false;
+  try {
+    // 顶层，或已知 Pixi 试玩域的 iframe
+    if (window === window.top) return true;
+    return isKnownPixiHost(location.hostname);
+  } catch {
+    return enabled;
+  }
+}
+
+function injectCoreResources(pixiProbe: boolean): void {
+  console.log(
+    '[Cocos Inspector] 注入资源',
+    pixiProbe ? '(含 Pixi 探针)' : '(Pixi 关)'
+  );
   const host = document.head || document.documentElement;
 
   const style = document.createElement('link');
@@ -46,11 +70,13 @@ function injectResources(): void {
   style.href = chrome.runtime.getURL('dist/inspector.css');
   host.appendChild(style);
 
-  // 2) 扩展 URL 探针（与 injected 同机制，async=false 保序）
-  const probe = document.createElement('script');
-  probe.src = chrome.runtime.getURL('dist/pixi-probe.js');
-  probe.async = false;
-  host.appendChild(probe);
+  if (pixiProbe) {
+    injectEarlyPixiProbe();
+    const probe = document.createElement('script');
+    probe.src = chrome.runtime.getURL('dist/pixi-probe.js');
+    probe.async = false;
+    host.appendChild(probe);
+  }
 
   const script = document.createElement('script');
   script.src = chrome.runtime.getURL('dist/injected.js');
@@ -156,9 +182,36 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
-// document_start：立刻注入探针 + 脚本（勿等 load，否则赶不上 Pixi bind console）
-injectResources();
-notifyExtensionActive();
+function bootContent(): void {
+  const apply = (pixiEnabled: boolean) => {
+    injectPixiEnabledFlag(pixiEnabled);
+    injectCoreResources(shouldInjectPixiProbe(pixiEnabled));
+    notifyExtensionActive();
+  };
+
+  try {
+    chrome.storage.sync.get(
+      { [PIXI_ENABLED_STORAGE_KEY]: PIXI_ENABLED_DEFAULT },
+      (res) => {
+        if (chrome.runtime.lastError) {
+          console.warn(
+            '[Cocos Inspector] 读取 Pixi 开关失败，默认关闭',
+            chrome.runtime.lastError.message
+          );
+          apply(false);
+          return;
+        }
+        apply(res?.[PIXI_ENABLED_STORAGE_KEY] === true);
+      }
+    );
+  } catch (e) {
+    console.warn('[Cocos Inspector] storage 不可用，Pixi 默认关闭', e);
+    apply(false);
+  }
+}
+
+// document_start：先读开关再注入（Pixi 默认关，避免误伤普通页）
+bootContent();
 
 window.addEventListener('message', (ev) => {
   if (ev.data?.type === 'cocos-inspector-ready') {

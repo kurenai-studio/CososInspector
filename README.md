@@ -4,7 +4,7 @@
 
 > 3.x：完整能力（树 / Inspector / 纹理 / MCP / 复刻）。  
 > 2.x：P0 节点树+暂停，P1 Sprite 贴图预览/下载，详见 [docs/features/cocos2-support.md](docs/features/cocos2-support.md)。  
-> Pixi：stage 树 / sprite 列表 / 截图 / ticker 暂停 + MCP，详见 [docs/features/pixi-support.md](docs/features/pixi-support.md)。
+> Pixi：默认关闭；扩展图标打开「启用 PixiJS 探测」后可用于 stage 树 / sprite / 截图 / MCP，详见 [docs/features/pixi-support.md](docs/features/pixi-support.md)。
 
 ## 功能
 

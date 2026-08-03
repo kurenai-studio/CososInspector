@@ -1,6 +1,7 @@
 declare namespace chrome {
   namespace runtime {
     function getURL(path: string): string;
+    function getManifest(): { version?: string; name?: string };
     const lastError?: { message?: string };
     function sendMessage(
       message: unknown,
@@ -19,6 +20,9 @@ declare namespace chrome {
           sendResponse: (response?: unknown) => void
         ) => boolean | void
       ) => void;
+    };
+    const onInstalled: {
+      addListener: (callback: (details?: unknown) => void) => void;
     };
   }
 
@@ -62,5 +66,15 @@ declare namespace chrome {
       func: (...args: unknown[]) => unknown;
       args?: unknown[];
     }): Promise<Array<{ result?: unknown }>>;
+  }
+
+  namespace storage {
+    const sync: {
+      get: (
+        keys: string | string[] | Record<string, unknown> | null,
+        callback: (items: Record<string, unknown>) => void
+      ) => void;
+      set: (items: Record<string, unknown>, callback?: () => void) => void;
+    };
   }
 }

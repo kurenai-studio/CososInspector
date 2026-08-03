@@ -44,6 +44,8 @@ function detectCocosFamily(): '2' | '3' | null {
 
 function detectPixiFamily(): 'pixi' | null {
   try {
+    // 扩展 popup 开关：默认关；未显式开启则不认 Pixi
+    if (window.__cocosInspectorPixiEnabled !== true) return null;
     installPixiConsoleHint();
     if (findPixiApplication()) return 'pixi';
     if (hasPixiSoftSignal()) return 'pixi';
@@ -85,7 +87,9 @@ export function waitForEngine(
   maxAttempts = 120,
   intervalMs = 500
 ): void {
-  installPixiConsoleHint();
+  if (window.__cocosInspectorPixiEnabled === true) {
+    installPixiConsoleHint();
+  }
   let attempts = 0;
   const timer = window.setInterval(() => {
     attempts += 1;

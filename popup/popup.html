@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cocos Inspector</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <strong>Cocos Inspector</strong>
+    <span id="ver" class="muted"></span>
+  </header>
+
+  <label class="row">
+    <input type="checkbox" id="pixi-enabled" />
+    <span>
+      <span class="title">启用 PixiJS 探测</span>
+      <span class="hint">默认关闭。开启后会对页面注入探针，仅在 SlotMill / GameArt 等 Pixi 试玩页使用；修改后请刷新目标页。</span>
+    </span>
+  </label>
+
+  <p id="status" class="status muted">读取设置…</p>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 # Cocos Inspector 3 文档索引
 
 当前主能力：**试玩页场景读取（S）+ Creator 场景复刻（P）+ MCP 自动化**。  
-**v3.2.0**：同一扩展支持 Creator **3.x + 2.x（含 2.4）**，以及无 Cocos 时的 **PixiJS MVP**（stage 树 / sprite / 截图 / 暂停 + MCP）。
+**v3.2.1**：PixiJS 探测改为 **popup 开关默认关闭**，并收紧 webpack 探针（仅已知试玩域），避免误伤普通网页白屏。同一扩展仍支持 Creator **3.x + 2.x**。
 
 ## Agent Skills（本仓库）
 

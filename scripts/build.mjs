@@ -1,4 +1,4 @@
-import { writeFileSync, mkdirSync, readFileSync } from 'fs';
+import { writeFileSync, mkdirSync, readFileSync, cpSync, existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { spawnSync } from 'child_process';
@@ -95,6 +95,15 @@ async function build() {
     );
   }
   writeFileSync(cssDst, cssBuf);
+
+  // popup（开关 UI，无需打包）
+  const popupSrc = join(root, 'popup');
+  const popupDst = join(dist, 'popup');
+  if (existsSync(popupSrc)) {
+    mkdirSync(popupDst, { recursive: true });
+    cpSync(popupSrc, popupDst, { recursive: true });
+  }
+
   console.log('build ok → dist/');
 }
 

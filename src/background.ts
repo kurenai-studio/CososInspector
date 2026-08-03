@@ -295,6 +295,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false;
 });
 
+chrome.runtime.onInstalled.addListener(() => {
+  try {
+    chrome.storage.sync.get({ pixiEnabled: false }, (res) => {
+      if (chrome.runtime.lastError) return;
+      if (typeof res?.pixiEnabled !== 'boolean') {
+        chrome.storage.sync.set({ pixiEnabled: false });
+      }
+    });
+  } catch {
+    /* ignore */
+  }
+});
+
 chrome.tabs.onUpdated.addListener(() => {
   void publishTabs();
 });

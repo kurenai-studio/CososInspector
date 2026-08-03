@@ -1,16 +1,32 @@
 /**
  * 注入到页面主世界的同步探针源码（字符串）。
  *
+ * 仅在 popup「启用 PixiJS 探测」打开后由 content 注入。
+ * 激进 webpack 偷 require / 扫模块：仅已知试玩域，避免白屏普通站。
+ *
  * Eternal Dusk / SlotMill 要点（Playwright 实探）：
  * - 仅有 webpackChunk*，无 window.__webpack_require__ / .c
- * - 用 chunk.push([ids, {}, runtimeFn]) 可偷到 require；模块在 require.m，需 require(id)
- * - this.pixiApp = new Application(...)；hook Application.prototype.render 可截已创建实例
+ * - 用 chunk.push([ids, {}, runtimeFn]) 可偷到 require；模块在 require.m
+ * - this.pixiApp = new Application(...)；hook Application.prototype.render
  */
 export const EARLY_PIXI_PROBE_SOURCE = `(function () {
   if (window.__cocosInspectorEarlyProbe) return;
+  // 开关未开则直接退出（双重保险；content 默认不注入本脚本）
+  if (window.__cocosInspectorPixiEnabled !== true) return;
   window.__cocosInspectorEarlyProbe = true;
   window.__cocosInspectorPixiHint = !!window.__cocosInspectorPixiHint;
   window.__cocosInspectorPixiApps = window.__cocosInspectorPixiApps || [];
+
+  function isKnownPixiHost() {
+    try {
+      return /(^|\\.)(slotmill\\.com|gameart\\.io|gahypergaming\\.com)$/i
+        .test(location.hostname);
+    } catch (e) { return false; }
+  }
+  /** 允许偷 webpack / 扫模块：仅已知宿主，避免误伤全网 SPA */
+  function allowAggressiveWebpack() {
+    return isKnownPixiHost();
+  }
 
   function looksLikeStage(v) {
     return !!(v && typeof v === 'object' && Array.isArray(v.children));
@@ -37,7 +53,6 @@ export const EARLY_PIXI_PROBE_SOURCE = `(function () {
   function registerApp(app) {
     try {
       if (!app || !looksLikeStage(app.stage)) return false;
-      // 热路径：已是当前 app 则立刻返回（render 每帧都会进）
       if (window.__PIXI_APP__ === app) return true;
       if (!(app.renderer || app.view || app.canvas || app.ticker ||
             typeof app.render === 'function')) {
@@ -102,7 +117,6 @@ export const EARLY_PIXI_PROBE_SOURCE = `(function () {
     var or = proto.render;
     proto.render = function (displayObject) {
       try {
-        // 已有 app 后不再每帧拼伪对象
         if (!window.__PIXI_APP__ && looksLikeStage(displayObject)) {
           registerStageRenderer(displayObject, this);
         }
@@ -168,24 +182,29 @@ export const EARLY_PIXI_PROBE_SOURCE = `(function () {
     patchPixiNamespace(ns);
   }
 
-  function markConsole(args) {
-    try {
-      for (var i = 0; i < args.length; i++) {
-        var s = typeof args[i] === 'string' ? args[i] : String(args[i]);
-        if (/PixiJS|pixi\\.js|@pixi\\//i.test(s)) {
-          window.__cocosInspectorPixiHint = true;
-          return;
+  // console 劫持仅已知宿主（普通站日志包装易踩雷）
+  if (allowAggressiveWebpack()) {
+    function markConsole(args) {
+      try {
+        for (var i = 0; i < args.length; i++) {
+          var s = typeof args[i] === 'string' ? args[i] : String(args[i]);
+          if (/PixiJS|pixi\\.js|@pixi\\//i.test(s)) {
+            window.__cocosInspectorPixiHint = true;
+            return;
+          }
         }
-      }
-    } catch (e) {}
+      } catch (e) {}
+    }
+    ['warn', 'log', 'error', 'info'].forEach(function (m) {
+      try {
+        var orig = console[m].bind(console);
+        console[m] = function () {
+          markConsole(arguments);
+          return orig.apply(console, arguments);
+        };
+      } catch (e) {}
+    });
   }
-  ['warn', 'log', 'error', 'info'].forEach(function (m) {
-    var orig = console[m].bind(console);
-    console[m] = function () {
-      markConsole(arguments);
-      return orig.apply(console, arguments);
-    };
-  });
 
   try {
     var _pixi = window.PIXI;
@@ -202,6 +221,7 @@ export const EARLY_PIXI_PROBE_SOURCE = `(function () {
   } catch (e) {}
 
   function stealWebpackRequire() {
+    if (!allowAggressiveWebpack()) return null;
     try {
       if (typeof window.__webpack_require__ === 'function' &&
           (window.__webpack_require__.m || window.__webpack_require__.c)) {
@@ -234,7 +254,6 @@ export const EARLY_PIXI_PROBE_SOURCE = `(function () {
         chunk.__cocosInspStolen = true;
         if (typeof got === 'function') return got;
       }
-      // 尚无 webpackChunk：下次再试，不要永久标记失败
       if (!sawChunk) return null;
     } catch (e) {}
     return window.__webpack_require__ || null;
@@ -250,8 +269,8 @@ export const EARLY_PIXI_PROBE_SOURCE = `(function () {
   }
 
   function scanWebpack() {
+    if (!allowAggressiveWebpack()) return;
     try {
-      // 已 patch 过 lib：不要再 require 全表，等 render 钩子截获即可
       if (window.__cocosInspectorPixiLib) return;
       var req = stealWebpackRequire();
       if (!req || typeof req !== 'function') return;
@@ -278,22 +297,23 @@ export const EARLY_PIXI_PROBE_SOURCE = `(function () {
   }
 
   try {
-    if (/(^|\\.)slotmill\\.com$/i.test(location.hostname)) {
+    if (isKnownPixiHost()) {
       window.__cocosInspectorPixiHint = true;
       window.__cocosInspectorPixiHost = true;
     }
   } catch (e) {}
 
-  // 低频重试直到截到 app（禁止 100ms 狂扫）
-  scanWebpack();
-  var retries = 0;
-  var timer = setInterval(function () {
-    retries++;
-    if (window.__PIXI_APP__) {
-      clearInterval(timer);
-      return;
-    }
-    if (!window.__cocosInspectorPixiLib) scanWebpack();
-    if (retries >= 10) clearInterval(timer); // ~20s
-  }, 2000);
+  if (allowAggressiveWebpack()) {
+    scanWebpack();
+    var retries = 0;
+    var timer = setInterval(function () {
+      retries++;
+      if (window.__PIXI_APP__) {
+        clearInterval(timer);
+        return;
+      }
+      if (!window.__cocosInspectorPixiLib) scanWebpack();
+      if (retries >= 10) clearInterval(timer);
+    }, 2000);
+  }
 })();`;

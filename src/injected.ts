@@ -792,8 +792,10 @@ class CocosInspector3 {
 }
 
 function bootInspector(): void {
-  // 尽早挂钩，捕获打包页「PixiJS Deprecation」等软信号
-  installPixiConsoleHint();
+  // 仅当 popup 开启 Pixi 时挂钩，避免普通页被 console 包装
+  if (window.__cocosInspectorPixiEnabled === true) {
+    installPixiConsoleHint();
+  }
 
   const start = (family: '2' | '3' | 'pixi'): void => {
     try {

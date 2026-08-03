@@ -61,6 +61,8 @@ declare global {
     };
     __PIXI_APP__?: PixiApplicationLike;
     __PIXI_STAGE__?: PixiDisplayObject;
+    /** popup 开关注入：仅 true 时启用 Pixi 探测 */
+    __cocosInspectorPixiEnabled?: boolean;
     __cocosInspectorPixiHint?: boolean;
     __cocosInspectorWebGL?: boolean;
     __cocosInspectorPixiApps?: PixiApplicationLike[];
@@ -384,7 +386,7 @@ function patchApplicationPrototypeLive(Application: {
 }
 
 /** 已知 Pixi 试玩宿主（避免误伤全网；SlotMill 等无全局 PIXI） */
-const KNOWN_PIXI_HOST_RE = /(^|\.)slotmill\.com$/i;
+import { KNOWN_PIXI_HOST_RE } from './settings';
 
 /** 软信号：必须有 Pixi 证据，禁止「任意 canvas/WebGL」误判 */
 export function hasPixiSoftSignal(): boolean {
