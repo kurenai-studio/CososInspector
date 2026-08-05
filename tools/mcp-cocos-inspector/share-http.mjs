@@ -4,12 +4,10 @@ import { dirname, extname, resolve } from 'path';
 import { getShareDir, ensureShareDirs } from './shared-fs.mjs';
 import { bridgeGetStatus, getDaemonMeta } from './bridge-server.mjs';
 import { exportPackViaBridge } from './export-pack-server.mjs';
-
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, HEAD, PUT, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
+import {
+  assertLocalBridgeRequest,
+  applyCorsHeaders,
+} from './local-origin-guard.mjs';
 
 const MIME = {
   '.png': 'image/png',
@@ -68,36 +66,50 @@ function collectBody(req) {
   });
 }
 
-function sendJson(res, status, obj) {
+function corsBase(origin) {
+  return applyCorsHeaders({}, origin);
+}
+
+function sendJson(res, status, obj, origin) {
   const body = JSON.stringify(obj);
   res.writeHead(status, {
-    ...CORS,
+    ...corsBase(origin),
     'Content-Type': 'application/json; charset=utf-8',
   });
   res.end(body);
 }
 
-async function handleApi(req, res, url) {
+async function handleApi(req, res, url, origin) {
   if (url.pathname === '/api/status' && req.method === 'GET') {
     try {
       const st = await bridgeGetStatus();
       const meta = getDaemonMeta();
-      sendJson(res, 200, {
-        ok: true,
-        service: 'cocos-inspector-local',
-        extensionConnected: !!st.extensionConnected,
-        shareDir: getShareDir(),
-        httpPort: listeningPort,
-        wsPort: meta?.wsPort ?? Number(process.env.COCOS_BRIDGE_PORT ?? 17373),
-        domain: st.domain ?? meta?.domain ?? null,
-        pageUrlMatch: st.pageUrlMatch ?? meta?.pageUrlMatch ?? null,
-        tabs: st.tabs ?? [],
-      });
+      sendJson(
+        res,
+        200,
+        {
+          ok: true,
+          service: 'cocos-inspector-local',
+          extensionConnected: !!st.extensionConnected,
+          shareDir: getShareDir(),
+          httpPort: listeningPort,
+          wsPort: meta?.wsPort ?? Number(process.env.COCOS_BRIDGE_PORT ?? 17373),
+          domain: st.domain ?? meta?.domain ?? null,
+          pageUrlMatch: st.pageUrlMatch ?? meta?.pageUrlMatch ?? null,
+          tabs: st.tabs ?? [],
+        },
+        origin
+      );
     } catch (e) {
-      sendJson(res, 500, {
-        ok: false,
-        error: e instanceof Error ? e.message : String(e),
-      });
+      sendJson(
+        res,
+        500,
+        {
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+        },
+        origin
+      );
     }
     return true;
   }
@@ -117,7 +129,7 @@ async function handleApi(req, res, url) {
     }
 
     const result = await exportPackViaBridge({ pageUrlMatch, repack });
-    sendJson(res, result.ok ? 200 : 400, result);
+    sendJson(res, result.ok ? 200 : 400, result, origin);
     return true;
   }
 
@@ -125,25 +137,32 @@ async function handleApi(req, res, url) {
 }
 
 async function handle(req, res, root) {
+  const gate = assertLocalBridgeRequest(req);
+  if (!gate.ok) {
+    sendJson(res, gate.status, { ok: false, error: gate.error }, null);
+    return;
+  }
+  const origin = gate.origin;
+
   try {
     const url = new URL(req.url ?? '/', `http://127.0.0.1`);
 
     if (req.method === 'OPTIONS') {
-      res.writeHead(204, CORS);
+      res.writeHead(204, corsBase(origin));
       res.end();
       return;
     }
 
     if (url.pathname.startsWith('/api/')) {
-      const handled = await handleApi(req, res, url);
+      const handled = await handleApi(req, res, url, origin);
       if (handled) return;
-      sendJson(res, 404, { ok: false, error: '未知 API' });
+      sendJson(res, 404, { ok: false, error: '未知 API' }, origin);
       return;
     }
 
     const rel = decodeURIComponent(url.pathname.replace(/^\//, ''));
     if (!rel || rel.includes('..')) {
-      res.writeHead(403, CORS);
+      res.writeHead(403, corsBase(origin));
       res.end();
       return;
     }
@@ -153,33 +172,38 @@ async function handle(req, res, root) {
       const body = await collectBody(req);
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, body);
-      res.writeHead(204, CORS);
+      res.writeHead(204, corsBase(origin));
       res.end();
       return;
     }
 
     if (req.method !== 'GET' && req.method !== 'HEAD') {
-      res.writeHead(405, CORS);
+      res.writeHead(405, corsBase(origin));
       res.end();
       return;
     }
 
     if (!existsSync(abs)) {
-      res.writeHead(404, CORS);
+      res.writeHead(404, corsBase(origin));
       res.end();
       return;
     }
     const mime = MIME[extname(abs).toLowerCase()] ?? 'application/octet-stream';
-    res.writeHead(200, { ...CORS, 'Content-Type': mime });
+    res.writeHead(200, { ...corsBase(origin), 'Content-Type': mime });
     if (req.method === 'HEAD') {
       res.end();
       return;
     }
     createReadStream(abs).pipe(res);
   } catch (e) {
-    sendJson(res, 500, {
-      ok: false,
-      error: e instanceof Error ? e.message : String(e),
-    });
+    sendJson(
+      res,
+      500,
+      {
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      },
+      origin
+    );
   }
 }

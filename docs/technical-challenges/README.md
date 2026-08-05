@@ -88,6 +88,7 @@
 - `executeScript` 易卡死 → **content 脚本中继** + `postMessage`
 - MCP 进程退出会带走桥 → 先运行 **`npm run cocos-bridge`**
 - **大图不走 WebSocket**：`tmp/mcp-share/` + HTTP `17374`；上传 `in/`、导出 `out/{prefix}/`、替换/下载只传路径
+- **本地桥安全**：Host 仅 loopback；Origin 白名单；禁止 `ACAO: *`
 
 ```powershell
 npm run cocos-bridge   # 常驻桥接 127.0.0.1:17373

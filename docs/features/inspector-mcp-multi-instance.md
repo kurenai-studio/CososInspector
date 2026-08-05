@@ -24,6 +24,17 @@ npm run cocos-bridge -- --domain play.godeebxp.com --page-url-match godeebxp
 | `--domain` | `COCOS_INSPECTOR_DOMAIN` | registry 主键，必填（多实例） |
 | `--page-url-match` | `COCOS_PAGE_URL_MATCH` | 扩展路由标签页时的 URL 子串 |
 | `--ws-port` | `COCOS_BRIDGE_PORT` | WebSocket 端口，默认 17373 |
+| （环境） | `COCOS_BRIDGE_ALLOWED_ORIGINS` | 额外允许的 Origin，逗号分隔；支持 `https://*.example.com` |
+
+## 本地桥安全（Host / Origin）
+
+HTTP（`17374`）与 WebSocket（`17373`）均强制：
+
+1. **Host** 必须是 `127.0.0.1` / `localhost` / `::1`（防 DNS rebinding）
+2. **Origin** 缺失时放行（Node / MCP）；若存在则须为 `chrome-extension://` / `moz-extension://` / loopback，或匹配 `--domain` / 扩展上报域名 / `COCOS_BRIDGE_ALLOWED_ORIGINS`
+3. **禁止** `Access-Control-Allow-Origin: *`；仅对白名单 Origin 回显 ACAO
+
+恶意网页直连 `http://127.0.0.1:17374` 会得到 `403`。
 
 共享文件目录：`tmp/mcp-share/<domain_underscore>/`。
 

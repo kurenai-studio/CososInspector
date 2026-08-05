@@ -5,6 +5,11 @@ import {
   removeRegistryInstance,
   upsertRegistryInstance,
 } from './bridge-registry.mjs';
+import {
+  addAllowedDomainHint,
+  addAllowedHostname,
+  verifyLocalBridgeClient,
+} from './local-origin-guard.mjs';
 
 const DEFAULT_PORT = Number(process.env.COCOS_BRIDGE_PORT ?? 17373);
 const DEFAULT_CALL_TIMEOUT_MS = 120_000;
@@ -35,6 +40,8 @@ let daemonMeta = null;
 
 export function setDaemonMeta(meta) {
   daemonMeta = meta ? { ...meta } : null;
+  if (daemonMeta?.domain) addAllowedHostname(daemonMeta.domain);
+  if (daemonMeta?.pageUrlMatch) addAllowedDomainHint(daemonMeta.pageUrlMatch);
 }
 
 export function getDaemonMeta() {
@@ -138,8 +145,10 @@ function onSocketMessage(ws, msg) {
     }
     extensionWs = ws;
     ws.reportedDomain = normalizeDomain(msg.domain ?? '');
+    if (ws.reportedDomain) addAllowedHostname(ws.reportedDomain);
     if (msg.pageUrlMatch) {
       if (daemonMeta) daemonMeta.pageUrlMatch = msg.pageUrlMatch;
+      addAllowedDomainHint(msg.pageUrlMatch);
     }
     if (Array.isArray(msg.tabs)) lastTabs = msg.tabs;
     syncRegistryExtension(true, ws.reportedDomain);
@@ -162,6 +171,7 @@ function onSocketMessage(ws, msg) {
         const d = normalizeDomain(new URL(first).hostname);
         if (d) {
           extensionWs.reportedDomain = d;
+          addAllowedHostname(d);
           syncRegistryExtension(true, d);
         }
       } catch {
@@ -349,7 +359,11 @@ export async function waitForExtension(maxMs = 60_000, wsPort = DEFAULT_PORT) {
 
 export function listenBridgeServer(preferredPort) {
   return new Promise((resolve, reject) => {
-    const server = new WebSocketServer({ host: '127.0.0.1', port: preferredPort });
+    const server = new WebSocketServer({
+      host: '127.0.0.1',
+      port: preferredPort,
+      verifyClient: (info) => verifyLocalBridgeClient(info),
+    });
 
     const onListenError = (err) => {
       server.removeListener('error', onListenError);
