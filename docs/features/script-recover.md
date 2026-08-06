@@ -32,6 +32,11 @@ rg "MainController|ccclass.*MainController" ./extracted/
 
 有 `.js.map` 时还原质量会高很多。
 
+## 批量运行时 Dump
+
+若要导出**整页已加载**脚本/URL 再离线拆包，用 MCP `cocos_dump_runtime`（见 [runtime-dump-reverse.md](./runtime-dump-reverse.md)），不要只靠单组件「还原 TS」。  
+包级逻辑还原的标准与三层产物见 [bundle-logic-recovery.md](./bundle-logic-recovery.md)。
+
 ## 实现
 
 - `src/cocos3/scriptRecover.ts`

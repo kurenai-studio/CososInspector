@@ -1,7 +1,8 @@
 # Cocos Inspector 3 文档索引
 
 当前主能力：**试玩页场景读取（S）+ Creator 场景复刻（P）+ MCP 自动化**。  
-**v3.2.1**：PixiJS 探测改为 **popup 开关默认关闭**，并收紧 webpack 探针（仅已知试玩域），避免误伤普通网页白屏。同一扩展仍支持 Creator **3.x + 2.x**。
+**v3.3.x**：运行时 Dump / Bundle 下载；另见 **Bundle 逻辑还原**（可读优先、理解层标准）——
+[bundle-logic-recovery.md](features/bundle-logic-recovery.md)。
 
 ## Agent Skills（本仓库）
 
@@ -22,6 +23,9 @@
 | [pixi-support.md](features/pixi-support.md) | PixiJS MVP（stage / MCP / 截图） |
 | [scene-recovery.md](features/scene-recovery.md) | Inspector → Creator 场景恢复（详细） |
 | [inspector-mcp-multi-instance.md](features/inspector-mcp-multi-instance.md) | 多试玩域 MCP 桥接 |
+| [mcp-local-bridge-cors.md](features/mcp-local-bridge-cors.md) | 自研 MCP 本地桥 CORS / Origin 安全 |
+| [bundle-logic-recovery.md](features/bundle-logic-recovery.md) | **Bundle 逻辑还原**：标准、三层产物、雷神2试验 |
+| [runtime-dump-reverse.md](features/runtime-dump-reverse.md) | 运行时 Dump → 下载 / JS 拆分操作说明 |
 | [node-tree.md](features/node-tree.md) | 节点树、Inspector 面板、位置显示 |
 | [spine-export.md](features/spine-export.md) | Spine 内存导出 |
 | [script-recover.md](features/script-recover.md) | 自定义组件 TS 草稿 |
