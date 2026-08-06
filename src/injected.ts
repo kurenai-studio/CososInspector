@@ -13,6 +13,7 @@ import {
 } from './engine/detect';
 import { whenDomReady } from './engine/mount';
 import { startPixiInspector } from './pixi/panel';
+import { startEgretInspector } from './egret/panel';
 import { installPixiConsoleHint } from './pixi/runtime';
 import {
   collectNodeInspectorData,
@@ -797,11 +798,12 @@ function bootInspector(): void {
     installPixiConsoleHint();
   }
 
-  const start = (family: '2' | '3' | 'pixi'): void => {
+  const start = (family: '2' | '3' | 'egret' | 'pixi'): void => {
     try {
       logEngine(`准备启动面板 engineFamily=${family}`);
       if (family === '3') new CocosInspector3();
       else if (family === '2') startCocosInspector2();
+      else if (family === 'egret') startEgretInspector();
       else startPixiInspector();
     } catch (e) {
       console.error(`[Cocos Inspector] 启动 ${family} 面板失败`, e);
