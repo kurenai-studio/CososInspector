@@ -1,6 +1,6 @@
 {
   "name": "cocosinspector",
-  "version": "3.2.2",
+  "version": "3.3.2",
   "description": "Cocos Creator 3.x / 2.x / PixiJS 节点树查看器 Chrome 扩展",
   "main": "dist/content.js",
   "scripts": {
@@ -9,6 +9,7 @@
     "cocos-autotest": "node tools/mcp-cocos-inspector/autotest.mjs",
     "cocos-export-pack": "node tools/mcp-cocos-inspector/export-pack.mjs",
     "cocos-scene-to-creator": "node tools/mcp-cocos-inspector/scene-to-creator.mjs",
+    "cocos-reverse": "node tools/mcp-cocos-inspector/cc-reverse-runner.mjs",
     "extract-har-particles": "node tools/mcp-cocos-inspector/extract-har-particles.mjs",
     "unpack-spine": "node tools/unpack-spine-export.mjs",
     "cocos-repack": "node tools/mcp-cocos-inspector/repack-latest.mjs",

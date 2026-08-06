@@ -1,10 +1,18 @@
 {
   "manifest_version": 3,
   "name": "Cocos Inspector 3",
-  "version": "3.2.2",
-  "description": "Cocos Creator 3.x / 2.x / PixiJS 场景节点树查看",
-  "permissions": ["activeTab", "scripting", "tabs", "storage"],
-  "host_permissions": ["http://*/*", "https://*/*"],
+  "version": "3.3.2",
+  "description": "Cocos Creator 3.x / 2.x / PixiJS 场景节点树查看器",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "tabs",
+    "storage"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
   "action": {
     "default_title": "Cocos Inspector",
     "default_popup": "dist/popup/popup.html"
@@ -14,9 +22,15 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["dist/content.js"],
-      "css": ["dist/inspector.css"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "dist/content.js"
+      ],
+      "css": [
+        "dist/inspector.css"
+      ],
       "run_at": "document_start",
       "all_frames": true
     }
@@ -28,7 +42,9 @@
         "dist/inspector.css",
         "dist/pixi-probe.js"
       ],
-      "matches": ["<all_urls>"]
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }

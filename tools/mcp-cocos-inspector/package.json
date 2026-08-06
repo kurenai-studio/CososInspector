@@ -7,11 +7,14 @@
     "mcp-cocos-inspector": "./index.mjs"
   },
   "scripts": {
-    "start": "node index.mjs"
+    "start": "node index.mjs",
+    "cocos-reverse": "node cc-reverse-runner.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
+    "cc-reverse": "^2.1.1",
     "chrome-remote-interface": "^0.33.3",
+    "prettier": "^3.9.6",
     "ws": "^8.18.2"
   }
 }

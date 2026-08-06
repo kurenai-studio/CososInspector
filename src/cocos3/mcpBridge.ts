@@ -49,6 +49,12 @@ import {
 } from './textureExtractLog';
 import { clearTexturePixelCache } from './textureExtract';
 import { readVisibleSpriteFromScreen } from './textureWebGL';
+import {
+  collectRuntimeDump,
+  type RuntimeDumpOptions,
+  type RuntimeDumpResult,
+  type RuntimeDumpError,
+} from './runtimeDump';
 
 export interface SerializableSpriteDetail {
   nodeId: string;
@@ -351,6 +357,16 @@ export const cocosInspectorMcpApi = {
     includeComponents?: boolean;
   }): SceneSnapshot | null {
     return exportSceneSnapshot(options);
+  },
+
+  /**
+   * 运行时 Dump：已加载脚本/类/URL/bundle config（非原 TS）。
+   * MCP 落盘后可喂 cc-reverse。
+   */
+  dumpRuntime(
+    options?: RuntimeDumpOptions
+  ): RuntimeDumpResult | RuntimeDumpError {
+    return collectRuntimeDump(options);
   },
 
   async getSpriteDetail(

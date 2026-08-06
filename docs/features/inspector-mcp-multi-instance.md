@@ -36,6 +36,8 @@ HTTP（`17374`）与 WebSocket（`17373`）均强制：
 
 恶意网页直连 `http://127.0.0.1:17374` 会得到 `403`。
 
+威胁模型、白名单来源、自测命令与改动原则见 **[mcp-local-bridge-cors.md](./mcp-local-bridge-cors.md)**。
+
 共享文件目录：`tmp/mcp-share/<domain_underscore>/`。
 
 ## Cursor MCP 配置

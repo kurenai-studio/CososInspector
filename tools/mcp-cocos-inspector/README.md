@@ -26,7 +26,9 @@ npm run cocos-bridge  （一个 Node 进程 = 本地服务）
 | **上传替换** | MCP 写入 `tmp/mcp-share/in/`；页面 HTTP 拉图 |
 | **下载纹理** | 桥接写入 `out/xxx.png`，返回路径 |
 
-环境变量：`COCOS_MCP_SHARE_DIR`、`COCOS_SHARE_HTTP_PORT`（默认 17374）
+环境变量：`COCOS_MCP_SHARE_DIR`、`COCOS_SHARE_HTTP_PORT`（默认 17374）、`COCOS_BRIDGE_ALLOWED_ORIGINS`（额外 Origin 白名单）
+
+本地桥 **CORS / Host / Origin** 安全说明：[docs/features/mcp-local-bridge-cors.md](../../docs/features/mcp-local-bridge-cors.md)
 
 `cocos_replace_texture` 优先用 **`imagePath`**（本地文件），避免 WebSocket 塞满 base64。
 
@@ -109,7 +111,11 @@ npm install
 | `cocos_export_replacement_pack` | 写出替换包 |
 | `cocos_get_scene_tree` | 轻量场景树 |
 | `cocos_export_scene_snapshot` | 完整场景快照 JSON |
+| `cocos_dump_runtime` | 运行时 Dump + 按 config 下载 js/config/import/native → `tmp/runtime-dump/` |
+| `cocos_reverse_project` | 对构建目录跑 cc-reverse |
 | `cocos_repack_super_html` | 本机重打包 |
+
+运行时 Dump → 离线逆向：`docs/features/runtime-dump-reverse.md`。
 
 风格替换流程：截屏 → 列 Sprite → 下载 → GenerateImage → `cocos_replace_texture` → 导出 → 重打包。
 

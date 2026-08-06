@@ -48,6 +48,8 @@ import {
   getConnectedPageUrl,
   invokeInPage,
 } from './cdp.mjs';
+import { materializeDumpLocal, fetchDumpUrls } from './runtime-dump-lib.mjs';
+import { runCcReverse } from './cc-reverse-runner.mjs';
 
 const repoRoot = resolve(join(dirname(fileURLToPath(import.meta.url)), '../..'));
 const useCdp = process.env.COCOS_USE_CDP === '1';
@@ -97,6 +99,7 @@ const BRIDGE_TIMEOUT_BY_METHOD = {
   listSpines: 120_000,
   listBmfonts: 120_000,
   exportSceneSnapshot: 300_000,
+  dumpRuntime: 300_000,
 };
 
 async function apiCall(method, argList, opts) {
@@ -500,6 +503,72 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           cdpPort: { type: 'number' },
         },
         required: ['outPath'],
+      },
+    },
+    {
+      name: 'cocos_dump_runtime',
+      description:
+        '游戏加载完成后 Dump 已加载脚本模块/自定义类/资源 URL/bundle config 并落盘。可选拉取 URL、跑 cc-reverse。非原 TS。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          outDir: {
+            type: 'string',
+            description: '输出目录（默认 tmp/runtime-dump/<host>/）',
+          },
+          fetchUrls: {
+            type: 'boolean',
+            description:
+              '是否由 Node 拉取 js/config/资源（默认 true；按 bundle config 展开 import/native）',
+          },
+          runReverse: {
+            type: 'boolean',
+            description: '是否对 build/ 跑 cc-reverse（默认 false；本阶段可忽略）',
+          },
+          includeModuleSources: { type: 'boolean' },
+          includeClassSources: { type: 'boolean' },
+          includeResourceUrls: { type: 'boolean' },
+          includeBundleConfigs: { type: 'boolean' },
+          maxFiles: {
+            type: 'number',
+            description: '最多拉取 URL 数（默认 8000）',
+          },
+          concurrency: {
+            type: 'number',
+            description: '下载并发（默认 8）',
+          },
+          fetchKinds: {
+            type: 'array',
+            items: { type: 'string', enum: ['js', 'config', 'asset', 'all'] },
+            description: '拉取种类（默认 js+config+asset）',
+          },
+          domain: { type: 'string' },
+          pageUrlMatch: { type: 'string' },
+          wsPort: { type: 'number' },
+        },
+      },
+    },
+    {
+      name: 'cocos_reverse_project',
+      description:
+        '对标准 Cocos 构建目录或 runtime-dump 的 build/ 调用 cc-reverse（离线拆包）。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            description: '输入构建目录',
+          },
+          output: { type: 'string' },
+          key: { type: 'string', description: '可选 XXTEA key' },
+          versionHint: {
+            type: 'string',
+            enum: ['2.3.x', '2.4.x', '3.x'],
+          },
+          assetsOnly: { type: 'boolean' },
+          scriptsOnly: { type: 'boolean' },
+        },
+        required: ['path'],
       },
     },
   ],
@@ -1067,6 +1136,97 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({ saved: outPath, ...meta }, null, 2),
           },
         ],
+      };
+    }
+
+    if (name === 'cocos_dump_runtime') {
+      await waitExt(opts);
+      const dumpOpts = {
+        includeModuleSources: args?.includeModuleSources !== false,
+        includeClassSources: args?.includeClassSources !== false,
+        includeResourceUrls: args?.includeResourceUrls !== false,
+        includeBundleConfigs: args?.includeBundleConfigs !== false,
+      };
+      const dump = await apiCall('dumpRuntime', [dumpOpts], opts);
+      if (!dump?.ok) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify(dump, null, 2) }],
+          isError: true,
+        };
+      }
+
+      let host = 'unknown-host';
+      try {
+        host = new URL(dump.pageUrl).hostname.replace(/\./g, '_');
+      } catch {
+        /* ignore */
+      }
+      const outDir = resolve(
+        args?.outDir || join(repoRoot, 'tmp', 'runtime-dump', host),
+      );
+      const local = materializeDumpLocal(dump, outDir);
+
+      let fetchResult = null;
+      const doFetch = args?.fetchUrls !== false;
+      if (doFetch) {
+        const kinds = Array.isArray(args?.fetchKinds) && args.fetchKinds.length
+          ? args.fetchKinds.map(String)
+          : ['js', 'config', 'asset'];
+        fetchResult = await fetchDumpUrls(dump, outDir, {
+          maxFiles: args?.maxFiles != null ? Number(args.maxFiles) : 8000,
+          concurrency: args?.concurrency != null ? Number(args.concurrency) : 8,
+          kinds,
+          expandFromConfig: true,
+        });
+      }
+
+      let reverseResult = null;
+      if (args?.runReverse) {
+        const buildPath = join(outDir, 'build');
+        reverseResult = runCcReverse({
+          path: buildPath,
+          output: join(outDir, 'cc-reverse-output'),
+          versionHint: '3.x',
+          verbose: true,
+        });
+      }
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                saved: outDir,
+                stats: dump.stats,
+                notes: dump.notes,
+                materialize: local,
+                fetch: fetchResult,
+                reverse: reverseResult,
+                pageUrl: dump.pageUrl,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+        isError: reverseResult ? !reverseResult.ok : false,
+      };
+    }
+
+    if (name === 'cocos_reverse_project') {
+      const res = runCcReverse({
+        path: args.path,
+        output: args.output,
+        key: args.key,
+        versionHint: args.versionHint || '3.x',
+        assetsOnly: !!args.assetsOnly,
+        scriptsOnly: !!args.scriptsOnly,
+        verbose: true,
+      });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+        isError: !res.ok,
       };
     }
 
