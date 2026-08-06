@@ -29,7 +29,7 @@ declare namespace cc {
   }
 
   const director: Director;
-  const game?: Game;
+  const game: Game | undefined;
   const ENGINE_VERSION: string;
 }
 

@@ -2,7 +2,7 @@ declare namespace chrome {
   namespace runtime {
     function getURL(path: string): string;
     function getManifest(): { version?: string; name?: string };
-    const lastError?: { message?: string };
+    const lastError: { message?: string } | undefined;
     function sendMessage(
       message: unknown,
       responseCallback?: (response: {

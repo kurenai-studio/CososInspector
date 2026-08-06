@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Cocos Inspector 3",
-  "version": "3.2.2",
-  "description": "Cocos Creator 3.x / 2.x / PixiJS 场景节点树查看",
+  "version": "3.3.0",
+  "description": "Cocos Creator 3.x / 2.x / Egret / PixiJS 场景节点树查看",
   "permissions": ["activeTab", "scripting", "tabs", "storage"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "action": {
