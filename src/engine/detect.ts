@@ -1,7 +1,8 @@
 /**
- * 统一引擎族检测：Creator 3.x / 2.x（含 2.4）/ PixiJS
+ * 统一引擎族检测：Creator 3.x / 2.x（含 2.4）/ Egret / PixiJS
  *
  * Pixi 判定必须有明确证据，禁止「任意 canvas / WebGL」兜底。
+ * Egret 判定：window.egret 存在且 stage 可解析（强证据，无需开关）。
  */
 
 import {
@@ -9,8 +10,9 @@ import {
   hasPixiSoftSignal,
   installPixiConsoleHint,
 } from '../pixi/runtime';
+import { getEgretStage } from '../egret/runtime';
 
-export type EngineFamily = '2' | '3' | 'pixi';
+export type EngineFamily = '2' | '3' | 'egret' | 'pixi';
 
 const LOG_PREFIX = '[Cocos Inspector]';
 
@@ -42,6 +44,15 @@ function detectCocosFamily(): '2' | '3' | null {
   }
 }
 
+function detectEgretFamily(): 'egret' | null {
+  try {
+    if (!window.egret) return null;
+    return getEgretStage() ? 'egret' : null;
+  } catch {
+    return null;
+  }
+}
+
 function detectPixiFamily(): 'pixi' | null {
   try {
     // 扩展 popup 开关：默认关；未显式开启则不认 Pixi
@@ -55,9 +66,9 @@ function detectPixiFamily(): 'pixi' | null {
   }
 }
 
-/** Cocos 优先；无 Cocos 时再认 Pixi（需明确证据） */
+/** Cocos 优先；无 Cocos 时再认 Egret（强证据）；最后 Pixi（需明确证据） */
 export function detectEngineFamily(): EngineFamily | null {
-  return detectCocosFamily() ?? detectPixiFamily();
+  return detectCocosFamily() ?? detectEgretFamily() ?? detectPixiFamily();
 }
 
 export function isCocos3(): boolean {
@@ -70,6 +81,10 @@ export function isCocos2(): boolean {
 
 export function isPixi(): boolean {
   return detectEngineFamily() === 'pixi';
+}
+
+export function isEgret(): boolean {
+  return detectEngineFamily() === 'egret';
 }
 
 function logPixiReady(): void {
@@ -101,6 +116,8 @@ export function waitForEngine(
         logEngine(
           `检测到 Cocos Creator 2.x（${String(window.cc?.ENGINE_VERSION ?? '2.x')}）`
         );
+      } else if (family === 'egret') {
+        logEngine('检测到 Egret（已定位 stage）');
       } else logPixiReady();
       onReady(family);
       return;
@@ -110,7 +127,7 @@ export function waitForEngine(
       window.clearInterval(timer);
       console.warn(
         LOG_PREFIX,
-        '未检测到 Cocos 2.x/3.x 或 PixiJS，扩展不会启动'
+        '未检测到 Cocos 2.x/3.x、Egret 或 PixiJS，扩展不会启动'
       );
     }
   }, intervalMs);
