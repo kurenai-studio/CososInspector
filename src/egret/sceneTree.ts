@@ -164,6 +164,20 @@ export function getSceneRoot(): EgretDisplayObject | null {
   return getEgretStage();
 }
 
+/** 通用遍历：对每个非遮罩节点回调；用于骨骼模块复用 */
+export function walkDisplayTree(
+  root: EgretDisplayObject,
+  cb: (node: EgretDisplayObject) => void
+): void {
+  const visit = (node: EgretDisplayObject | null | undefined): void => {
+    if (!node) return;
+    cb(node);
+    const kids = getDisplayChildren(node);
+    for (const c of kids) visit(c);
+  };
+  visit(root);
+}
+
 export function getSceneTreeLite(): {
   engineFamily: 'egret';
   rootId: string;
