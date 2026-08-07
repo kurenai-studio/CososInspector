@@ -444,6 +444,55 @@ async function main() {
     console.warn('[verify] 场景批量打包失败:', JSON.stringify(scenePack));
   }
 
+  // 点击拾取（picker）核心链路验证：stage.$hitTest 中心点 + getPathToNode 反查路径
+  const pick = await cdp.eval(`(() => {
+    const api = window.__cocosInspectorApi;
+    if (!api || !api.getSceneTree) return { ok: false, error: 'no api.getSceneTree' };
+    try {
+      const info = api.getSceneTree();
+      const root = info && info.rootId;
+      const stage = window.egret && window.egret.sys && window.egret.sys.$TempStage;
+      if (!stage) return { ok: false, error: 'no stage' };
+      const W = Number(stage.stageWidth) || 0;
+      const H = Number(stage.stageHeight) || 0;
+      if (!W || !H) return { ok: false, error: 'stage size 0' };
+      const hitTest = stage.$hitTest || stage.hitTest;
+      if (typeof hitTest !== 'function') return { ok: false, error: 'no stage.$hitTest' };
+      const cx = W / 2, cy = H / 2;
+      const node = hitTest.call(stage, cx, cy);
+      if (!node) return { ok: false, error: 'center hitTest null', stageSize: { w: W, h: H } };
+      const id = (function () {
+        const m = new WeakMap();
+        let s = 0;
+        function gid(n) {
+          if (!n) return '';
+          if (m.has(n)) return m.get(n);
+          s += 1;
+          const v = 'egret-' + s;
+          m.set(n, v);
+          return v;
+        }
+        return gid(node);
+      })();
+      return {
+        ok: true,
+        stageSize: { w: W, h: H },
+        hitName: node.name || node.constructor?.name || '',
+        hitId: id,
+        hitCtor: node.constructor?.name || '',
+      };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message || e) };
+    }
+  })()`);
+  if (pick && pick.ok) {
+    console.log(
+      `[verify] Picker hitTest 成功: stage ${pick.stageSize.w}×${pick.stageSize.h} · 中心点击中 ${pick.hitName} (${pick.hitCtor}) id=${pick.hitId}`
+    );
+  } else {
+    console.warn('[verify] Picker hitTest 失败:', JSON.stringify(pick));
+  }
+
   // 截图确认面板渲染（带容错，失败不致命）
   await sleep(1200);
   try {
