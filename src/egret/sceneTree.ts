@@ -178,6 +178,30 @@ export function walkDisplayTree(
   visit(root);
 }
 
+/** 计算从 root 到 targetId 的节点 id 路径（不含 root 自身），用于自动展开 */
+export function getPathToNode(
+  root: EgretDisplayObject,
+  targetId: string
+): string[] | null {
+  const path: string[] = [];
+  const walk = (node: EgretDisplayObject): boolean => {
+    if (getDisplayId(node) === targetId) return true;
+    const kids = getDisplayChildren(node);
+    for (const c of kids) {
+      path.push(getDisplayId(c));
+      if (walk(c)) return true;
+      path.pop();
+    }
+    return false;
+  };
+  for (const c of getDisplayChildren(root)) {
+    path.push(getDisplayId(c));
+    if (walk(c)) return path;
+    path.pop();
+  }
+  return null;
+}
+
 export function getSceneTreeLite(): {
   engineFamily: 'egret';
   rootId: string;

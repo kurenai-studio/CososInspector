@@ -18,11 +18,13 @@ import {
   getDisplayId,
   getDisplayName,
   getSceneRoot,
+  getPathToNode,
   hashTree,
   setNodeActive,
 } from './sceneTree';
 import { collectSpriteList } from './sprites';
 import { getNodeTexture } from './textureExtract';
+import { startPickMode, stopPickMode, isPickModeActive } from './nodePicker';
 
 declare const __INSPECTOR_VERSION__: string;
 
@@ -45,6 +47,8 @@ export class EgretInspector {
   private isCollapsed = false;
   private sceneTreeHash = '';
   private updateTimer: number | null = null;
+  private isPickMode = false;
+  private pickBtn: HTMLButtonElement | null = null;
 
   constructor() {
     this.init();
@@ -162,6 +166,14 @@ export class EgretInspector {
     toggleBtn.addEventListener('click', () => this.setCollapsed(!this.isCollapsed));
     controls.appendChild(toggleBtn);
 
+    this.pickBtn = document.createElement('button');
+    this.pickBtn.type = 'button';
+    this.pickBtn.className = 'pick-btn';
+    this.pickBtn.textContent = '拾取';
+    this.pickBtn.title = '点击页面元素 → 自动定位到节点树';
+    this.pickBtn.addEventListener('click', () => this.togglePickMode());
+    controls.appendChild(this.pickBtn);
+
     header.appendChild(controls);
     this.panel.appendChild(header);
 
@@ -206,6 +218,45 @@ export class EgretInspector {
         `未连接 MCP。请在 Cursor 启用 cocos-inspector MCP，并确认端口 ${port} 可用。`,
     };
     this.mcpStatusEl.title = hints[status] ?? `MCP 状态: ${status}`;
+  }
+
+  private togglePickMode(): void {
+    if (this.isPickMode) {
+      this.stopPickModeInternal();
+    } else {
+      this.startPickModeInternal();
+    }
+  }
+
+  private startPickModeInternal(): void {
+    if (this.isPickMode) return;
+    this.isPickMode = true;
+    this.pickBtn?.classList.add('pick-btn--active');
+    if (this.pickBtn) this.pickBtn.textContent = '取消拾取';
+    if (!isPickModeActive()) {
+      startPickMode((nodeId) => this.onNodePicked(nodeId));
+    }
+  }
+
+  private stopPickModeInternal(): void {
+    if (!this.isPickMode) return;
+    this.isPickMode = false;
+    this.pickBtn?.classList.remove('pick-btn--active');
+    if (this.pickBtn) this.pickBtn.textContent = '拾取';
+    stopPickMode();
+  }
+
+  private onNodePicked(nodeId: string): void {
+    this.selectedId = nodeId;
+    const root = getSceneRoot();
+    if (root) {
+      const path = getPathToNode(root, nodeId);
+      if (path) {
+        for (const id of path) this.expandedScene.add(id);
+      }
+    }
+    this.stopPickModeInternal();
+    this.refreshAll(true);
   }
 
   private setCollapsed(collapsed: boolean): void {
