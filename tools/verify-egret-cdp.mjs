@@ -365,6 +365,64 @@ async function main() {
     for (const line of ours.slice(0, 20)) console.log('  ' + line);
   }
 
+  // DragonBones / Spine 骨骼导出验证（bydrqp 捕鱼游戏使用 DragonBones）
+  const bones = await cdp.eval(`(() => {
+    const api = window.__cocosInspectorApi;
+    if (!api || !api.listDragonBones) return { ok: false, error: 'no api.listDragonBones' };
+    const list = api.listDragonBones();
+    return { ok: true, total: list.length, list };
+  })()`);
+  if (bones && bones.ok) {
+    console.log(`[verify] DragonBones 清单: 共 ${bones.total} 项`);
+    for (const it of (bones.list || []).slice(0, 5)) {
+      console.log(
+        `  - [${it.source}] ${it.name} · armature=${it.armatureName} · anims=${(it.anims || []).length} · ${it.nodePath}`
+      );
+    }
+    // 选第一个 DragonBones 项导出 zip
+    if (bones.total > 0) {
+      const first = bones.list[0];
+      const dl = await cdp.eval(`(async () => {
+        const api = window.__cocosInspectorApi;
+        return await api.downloadDragonBones(${JSON.stringify(first.id)});
+      })()`);
+      if (dl && dl.ok) {
+        console.log(
+          `[verify] DragonBones 导出成功: ${dl.zipName} · 文件 ${dl.files.length} 项 · zipBase64 ${dl.zipBase64.length} 字符`
+        );
+        for (const f of dl.files.slice(0, 8)) {
+          console.log(`    - ${f.name} (${f.mime}${f.bytes ? ` ${f.bytes}B` : ''})`);
+        }
+        if (dl.reason) console.warn(`[verify]   部分缺失: ${dl.reason}`);
+        if (dl.log && dl.log.length) {
+          console.log('[verify]   日志:');
+          for (const l of dl.log.slice(0, 12)) console.log(`    - ${l}`);
+        }
+      } else {
+        console.warn('[verify] DragonBones 导出失败:', JSON.stringify(dl));
+      }
+    } else {
+      console.warn('[verify] 场景无 DragonBones，跳过导出验证');
+    }
+  } else {
+    console.warn('[verify] DragonBones 清单获取失败:', JSON.stringify(bones));
+  }
+
+  // Spine 清单（Egret 5.x 通常不加载 spine，但需验证兼容性）
+  const spines = await cdp.eval(`(() => {
+    const api = window.__cocosInspectorApi;
+    if (!api || !api.listSpines) return { ok: false, error: 'no api.listSpines' };
+    return { ok: true, list: api.listSpines() };
+  })()`);
+  if (spines && spines.ok) {
+    console.log(`[verify] Spine 清单: 共 ${spines.list.length} 项`);
+    for (const it of spines.list.slice(0, 5)) {
+      console.log(`  - ${it.name} · anims=${(it.anims || []).length} · ${it.nodePath}`);
+    }
+  } else {
+    console.log('[verify] Spine 不可用（兼容性保留）:', JSON.stringify(spines));
+  }
+
   // 截图确认面板渲染（带容错，失败不致命）
   await sleep(1200);
   try {
