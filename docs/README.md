@@ -20,6 +20,7 @@
 |------|------|
 | [cocos2-support.md](features/cocos2-support.md) | Creator 2.x（含 2.4）P0–P8a 支持 |
 | [pixi-support.md](features/pixi-support.md) | PixiJS MVP（stage / MCP / 截图） |
+| [egret-support.md](features/egret-support.md) | Egret 5.x MVP（树 / 贴图 / 资源清单 / 原始资源下载） |
 | [scene-recovery.md](features/scene-recovery.md) | Inspector → Creator 场景恢复（详细） |
 | [inspector-mcp-multi-instance.md](features/inspector-mcp-multi-instance.md) | 多试玩域 MCP 桥接 |
 | [node-tree.md](features/node-tree.md) | 节点树、Inspector 面板、位置显示 |
@@ -42,4 +43,4 @@
 - `features/hooks.md`、`inspector.md`、`performance.md`、`ui-controls.md` — 2.x 已移除能力，仅作参考
 - `fastspin-analysis/` — FastSpin 逆向（`archive/legacy-main` 时代产物）
 
-实现代码：`src/cocos3/`、`src/cocos2/`、`src/pixi/`、`tools/mcp-cocos-inspector/`。根目录 [README.md](../README.md) 含构建安装说明。
+实现代码：`src/cocos3/`、`src/cocos2/`、`src/pixi/`、`src/egret/`、`tools/mcp-cocos-inspector/`。根目录 [README.md](../README.md) 含构建安装说明。

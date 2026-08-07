@@ -1,10 +1,11 @@
 # Cocos Inspector 3
 
-面向 **Cocos Creator 3.x**、**2.x（含 2.4）** 与 **PixiJS（MVP）** 的 Chrome 扩展 + MCP：在浏览器试玩页查看场景、导出快照与纹理，并配合 **cocos-meta-mcp** 在 Creator 中复刻场景。
+面向 **Cocos Creator 3.x**、**2.x（含 2.4）**、**PixiJS（MVP）** 与 **Egret 5.x（MVP）** 的 Chrome 扩展 + MCP：在浏览器试玩页查看场景、导出快照与纹理，并配合 **cocos-meta-mcp** 在 Creator 中复刻场景。
 
 > 3.x：完整能力（树 / Inspector / 纹理 / MCP / 复刻）。  
 > 2.x：P0 节点树+暂停，P1 Sprite 贴图预览/下载，详见 [docs/features/cocos2-support.md](docs/features/cocos2-support.md)。  
-> Pixi：默认关闭；扩展图标打开「启用 PixiJS 探测」后可用于 stage 树 / sprite / 截图 / MCP，详见 [docs/features/pixi-support.md](docs/features/pixi-support.md)。
+> Pixi：默认关闭；扩展图标打开「启用 PixiJS 探测」后可用于 stage 树 / sprite / 截图 / MCP，详见 [docs/features/pixi-support.md](docs/features/pixi-support.md)。  
+> Egret：自动检测（无需开关），提供显示对象树、纹理提取、RES 资源清单与原始资源下载，详见 [docs/features/egret-support.md](docs/features/egret-support.md)。
 
 ## 功能
 
@@ -52,9 +53,11 @@ npm run build
 src/
   content.ts / injected.ts / background.ts
   cocos3/               # 场景树、快照、纹理、MCP 桥
+  egret/                # Egret 5.x MVP（树 / 贴图 / 资源 / MCP 桥）
 tools/
   mcp-cocos-inspector/  # Inspector MCP + scene-to-creator
   repack-web/           # 换皮 Web（分支能力）
+  verify-egret-cdp.mjs  # Egret 一次性验证（Edge + CDP）
 .cursor/skills/
   inspector-scene-recovery/  # 场景复刻 P+S Skill
 docs/                   # 见 docs/README.md
