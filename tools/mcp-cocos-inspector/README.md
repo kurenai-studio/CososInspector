@@ -117,6 +117,12 @@ npm install
 
 运行时 Dump → 离线逆向：`docs/features/runtime-dump-reverse.md`。
 
+Creator 打开 cc-reverse 资源前若出现大量 `EISDIR`，跑：
+
+```powershell
+node fix-image-shell-dirs.mjs <工程>/assets --native-root <dump>/build/assets
+```
+
 风格替换流程：截屏 → 列 Sprite → 下载 → GenerateImage → `cocos_replace_texture` → 导出 → 重打包。
 
 **场景复刻**（试玩 → Creator）：读 `.cursor/skills/inspector-scene-recovery/SKILL.md`，详参 `docs/features/scene-recovery.md`。

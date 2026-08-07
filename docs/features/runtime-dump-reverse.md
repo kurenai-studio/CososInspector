@@ -81,6 +81,30 @@ node restore-scripts-l3.mjs .../slotgame --out .../slotgame-restored \
   --dump .../manifest.json
 ```
 
+## Creator 工程：image 空壳目录修复（必要步骤）
+
+`cc-reverse --assets-only` 常把 Image 展开成「目录 + texture/spriteFrame meta」，
+同时又从 `native/` 旁路生成同名 `.png/.jpg`。Creator 打开时会优先啃**空壳目录**
+（`importer: image` 却无贴图）→ 大量 `EISDIR` / `Importer exec failed`，
+资源面板粉线、`spriteFrame` 显示 `{}`。
+
+**必要修复**（打开 Creator 前或导入失败后立刻做）：
+
+```bash
+node tools/mcp-cocos-inspector/fix-image-shell-dirs.mjs <工程>/assets \
+  --native-root <dump>/build/assets
+```
+
+行为：
+
+| 情况 | 处理 |
+|------|------|
+| 旁路已有同名 `.png/.jpg` | 把空壳目录的**原包 UUID**写回旁路 `.meta`，删除空壳目录 |
+| 无旁路 | 从 `build/assets/*/native/<uuid>.*` 拷图并写 meta，再删空壳 |
+
+验证：`asset-db` 用原 UUID 能查到 `cc.ImageAsset` 且 `imported: true`；
+控制台不再新增 `EISDIR`。
+
 ## 实现
 
 - `src/cocos3/runtimeDump.ts`
@@ -89,4 +113,5 @@ node restore-scripts-l3.mjs .../slotgame --out .../slotgame-restored \
 - `tools/mcp-cocos-inspector/split-system-register.mjs`
 - `tools/mcp-cocos-inspector/readableize-system-register.mjs`
 - `tools/mcp-cocos-inspector/restore-scripts-l3.mjs`
+- `tools/mcp-cocos-inspector/fix-image-shell-dirs.mjs`
 - MCP：`index.mjs` → `cocos_dump_runtime`

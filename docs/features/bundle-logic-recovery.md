@@ -102,3 +102,15 @@ node logicize-scripts.mjs <restored??> --out <logic??>
 
 - [runtime-dump-reverse.md](./runtime-dump-reverse.md)
 - `split-system-register.mjs` / `readableize-system-register.mjs` / `restore-scripts-l3.mjs` / `logicize-scripts.mjs`
+
+## Creator 打开前：修 image 空壳目录（必要）
+
+cc-reverse 展开 Image 后常见「空壳目录 + 旁路 png」双份，Creator 会 EISDIR。
+打开工程前执行：
+
+```bash
+node tools/mcp-cocos-inspector/fix-image-shell-dirs.mjs <工程>/assets \
+  --native-root <dump>/build/assets
+```
+
+详见 [runtime-dump-reverse.md](./runtime-dump-reverse.md) 同名章节。
