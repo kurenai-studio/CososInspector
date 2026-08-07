@@ -32,10 +32,22 @@ export type EgretDisplayObject = {
   stageHeight?: number;
 };
 
+export type EgretBitmapDataSource =
+  | HTMLImageElement
+  | HTMLCanvasElement
+  | ImageBitmap;
+
+/** WebGL 渲染模式下 $bitmapData 是引擎包装对象，真实图源在 $source/source */
+export type EgretWebGLBitmapDataLike = {
+  $source?: EgretBitmapDataSource | null;
+  source?: EgretBitmapDataSource | null;
+  $webGLTexture?: unknown;
+};
+
 export type EgretTextureLike = {
-  /** 源位图：HTMLImageElement / HTMLCanvasElement / ImageBitmap */
-  $bitmapData?: HTMLImageElement | HTMLCanvasElement | ImageBitmap | null;
-  _bitmapData?: HTMLImageElement | HTMLCanvasElement | ImageBitmap | null;
+  /** 源位图：可直接绘制对象，或 WebGL 包装对象 */
+  $bitmapData?: EgretBitmapDataSource | EgretWebGLBitmapDataLike | null;
+  _bitmapData?: EgretBitmapDataSource | EgretWebGLBitmapDataLike | null;
   /** 图集中区域（subimage） */
   $bitmapX?: number;
   $bitmapY?: number;
