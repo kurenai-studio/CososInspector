@@ -4,7 +4,8 @@
  *
  * 核心方法对齐 MCP server（tools/mcp-cocos-inspector/index.mjs）：
  *   getPageInfo / 暂停四件 / setNodeActive / listSprites / getSceneTree /
- *   downloadTexture / captureGameScreenshot / evalPage
+ *   downloadTexture / listResources / downloadResource /
+ *   captureGameScreenshot / evalPage
  */
 import {
   getPauseState,
@@ -21,8 +22,21 @@ import {
   setNodeActive,
 } from './sceneTree';
 import { collectSpriteList } from './sprites';
-import { extractNodeTextureToPng } from './textureExtract';
+import {
+  extractNodeTextureToPng,
+  extractWholeSourceToPng,
+  getTextureSourceUrl,
+  getNodeTexture,
+} from './textureExtract';
+import {
+  collectResourceList,
+  downloadResource,
+  resolveResourceUrl as resolveResourceUrlPublic,
+  type EgretResourceDownload,
+  type EgretResourceList,
+} from './resources';
 import { getEgretCanvas, getEgretVersion } from './runtime';
+import type { EgretDisplayObject } from './runtime';
 
 export type EgretTextureDownloadResult =
   | {
@@ -32,7 +46,7 @@ export type EgretTextureDownloadResult =
       width: number;
       height: number;
       filename: string;
-      detail: { extractMethod: string };
+      detail: { extractMethod: string; sourceUrl?: string | null };
     }
   | { ok: false; error: string };
 
@@ -54,6 +68,28 @@ function canvasToPngBase64(
       error: e instanceof Error ? e.message : String(e),
     };
   }
+}
+
+/** 在显示列表中查找第一个纹理源 URL 等于指定值的节点 */
+function findNodeBySourceUrl(
+  root: EgretDisplayObject,
+  url: string
+): EgretDisplayObject | null {
+  const walk = (node: EgretDisplayObject): EgretDisplayObject | null => {
+    const u = getTextureSourceUrl(getNodeTexture(node));
+    if (u && u === url) return node;
+    const kids = node.$children;
+    if (Array.isArray(kids)) {
+      for (const c of kids) {
+        if (c) {
+          const hit = walk(c);
+          if (hit) return hit;
+        }
+      }
+    }
+    return null;
+  };
+  return walk(root);
 }
 
 export const egretInspectorMcpApi = {
@@ -143,6 +179,7 @@ export const egretInspectorMcpApi = {
     const name = getDisplayName(node).replace(/[^\w一-龥.-]/g, '_');
     const extracted = extractNodeTextureToPng(node);
     if (!extracted.ok) return { ok: false, error: extracted.error };
+    const sourceUrl = getTextureSourceUrl(getNodeTexture(node));
     return {
       ok: true,
       delivery: 'inline',
@@ -150,7 +187,51 @@ export const egretInspectorMcpApi = {
       width: extracted.width,
       height: extracted.height,
       filename: `${name}_${nodeId}.png`,
-      detail: { extractMethod: extracted.method },
+      detail: { extractMethod: extracted.method, sourceUrl: sourceUrl ?? null },
+    };
+  },
+
+  /** 列出 RES 清单中的资源（含运行时已加载但未在 alias 的图源 URL） */
+  listResources(limit?: number) {
+    return collectResourceList(limit);
+  },
+
+  /**
+   * 下载原始资源文件字节。
+   * 优先 RES.config 路径解析 + 页内 fetch；fetch 失败时若指向图片且节点存在，
+   * 回退到从已解码 HTMLImageElement 绘制整张源图（参考插件 le()/ce() 思路）。
+   */
+  async downloadResource(
+    nameOrUrl: string,
+    opts?: { nodeId?: string }
+  ): Promise<EgretResourceDownload> {
+    const direct = await downloadResource(nameOrUrl);
+    if (direct.ok) return direct;
+
+    // fetch 失败：尝试从指定节点（或第一个引用该 URL 的节点）回退到 canvas 整图导出
+    const url = resolveResourceUrlPublic(nameOrUrl);
+    if (!url) return direct;
+    const root = getSceneRoot();
+    if (!root) return direct;
+    const target = opts?.nodeId
+      ? findDisplayById(root, opts.nodeId)
+      : findNodeBySourceUrl(root, url);
+    if (!target) return direct;
+    const t = getNodeTexture(target);
+    if (!t) return direct;
+    const whole = extractWholeSourceToPng(t);
+    if (!whole.ok) return { ok: false, error: `${direct.error}（回退 canvas 也失败: ${whole.error}）` };
+    const fallbackName = url.split('/').pop()?.split('?')[0] || 'resource.png';
+    return {
+      ok: true,
+      delivery: 'inline',
+      base64: whole.base64,
+      filename: fallbackName.replace(/\.(webp|jpg|jpeg|gif|bmp)$/i, '.png'),
+      detail: {
+        sourceUrl: url,
+        bytes: Math.round(whole.base64.length * 0.75),
+        mime: 'image/png',
+      },
     };
   },
 
