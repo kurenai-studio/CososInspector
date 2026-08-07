@@ -423,6 +423,27 @@ async function main() {
     console.log('[verify] Spine 不可用（兼容性保留）:', JSON.stringify(spines));
   }
 
+  // 场景批量打包下载验证
+  const scenePack = await cdp.eval(`(async () => {
+    const api = window.__cocosInspectorApi;
+    if (!api || !api.downloadSceneAssets) return { ok: false, error: 'no api.downloadSceneAssets' };
+    return await api.downloadSceneAssets();
+  })()`);
+  if (scenePack && scenePack.ok) {
+    console.log(
+      `[verify] 场景批量打包: ${scenePack.zipName} · 文件 ${scenePack.files.length} 项 · zipBase64 ${scenePack.zipBase64.length} 字符`
+    );
+    for (const f of scenePack.files.slice(0, 12)) {
+      console.log(`    - ${f.name} (${f.bytes || 0}B)`);
+    }
+    if (scenePack.log && scenePack.log.length) {
+      console.log('[verify]   日志:');
+      for (const l of scenePack.log.slice(0, 12)) console.log(`    - ${l}`);
+    }
+  } else {
+    console.warn('[verify] 场景批量打包失败:', JSON.stringify(scenePack));
+  }
+
   // 截图确认面板渲染（带容错，失败不致命）
   await sleep(1200);
   try {

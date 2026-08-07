@@ -39,6 +39,7 @@ import { getEgretCanvas, getEgretVersion } from './runtime';
 import type { EgretDisplayObject } from './runtime';
 import { listDragonBones, exportDragonBones } from './dragonBonesExport';
 import { listSpines, exportSpine } from './spineExport';
+import { exportSceneAssets } from './sceneAssetsExport';
 import type { SkeletonExportResult } from './skeletonCommon';
 
 export type EgretTextureDownloadResult =
@@ -276,6 +277,11 @@ export const egretInspectorMcpApi = {
   /** 导出指定 Spine 资源为 zip（base64 inline） */
   async downloadSpine(id: string): Promise<SkeletonExportResult> {
     return exportSpine(id);
+  },
+
+  /** 批量打包下载当前场景用到的所有图片和龙骨/Spine */
+  async downloadSceneAssets(): Promise<SkeletonExportResult> {
+    return exportSceneAssets();
   },
 };
 
