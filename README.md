@@ -5,7 +5,7 @@
 > 3.x：完整能力（树 / Inspector / 纹理 / MCP / 复刻）。  
 > 2.x：P0 节点树+暂停，P1 Sprite 贴图预览/下载，详见 [docs/features/cocos2-support.md](docs/features/cocos2-support.md)。  
 > Pixi：默认关闭；扩展图标打开「启用 PixiJS 探测」后可用于 stage 树 / sprite / 截图 / MCP，详见 [docs/features/pixi-support.md](docs/features/pixi-support.md)。  
-> Egret：自动检测（无需开关），提供显示对象树、纹理提取、RES 资源清单与原始资源下载，详见 [docs/features/egret-support.md](docs/features/egret-support.md)。
+> Egret：自动检测（无需开关），提供显示对象树、纹理提取、RES 资源清单与原始资源下载、**DragonBones/Spine 内存导出**（zip inline），详见 [docs/features/egret-support.md](docs/features/egret-support.md)。
 
 ## 功能
 
@@ -14,7 +14,7 @@
 - 场景节点树、Inspector 组件面板（含 **Node 位置**、扩展 **版本号**）
 - 工具栏 **暂停/继续**（`director.pause`），停住后看节点属性；MCP：`cocos_pause_game` 等
 - MCP：`cocos_export_scene_snapshot`、`cocos_download_texture`、`scene-to-creator` 等
-- Spine / BMFont 内存导出、DC 扫描、资源浮窗
+- Spine / BMFont 内存导出（Cocos 3.x）、DragonBones / Spine 内存导出（Egret）、DC 扫描、资源浮窗
 - 与 Creator **cocos-meta-mcp** 配合复刻试玩场景（见下方 Skill）
 
 ### 分支（换皮）
@@ -53,7 +53,7 @@ npm run build
 src/
   content.ts / injected.ts / background.ts
   cocos3/               # 场景树、快照、纹理、MCP 桥
-  egret/                # Egret 5.x MVP（树 / 贴图 / 资源 / MCP 桥）
+  egret/                # Egret 5.x MVP（树 / 贴图 / 资源 / DragonBones+Spine 导出 / MCP 桥）
 tools/
   mcp-cocos-inspector/  # Inspector MCP + scene-to-creator
   repack-web/           # 换皮 Web（分支能力）

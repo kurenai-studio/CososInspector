@@ -18,6 +18,10 @@
 | 纹理提取 | MCP `downloadTexture`：按 `$bitmapX/Y/W/H` 从图集裁剪子图 |
 | **资源清单** | MCP `listResources`：基于 `RES.config.config.fileSystem.fsData` 展开为绝对 URL，标记 `inUse`（当前显示列表引用） |
 | **原始资源下载** | MCP `downloadResource`：解析资源名→URL，页内 `fetch` 拿原始字节；fetch 失败时回退到从已解码 `HTMLImageElement` 整图导出 |
+| **DragonBones 列表** | MCP `listDragonBones`：场景 `EgretArmatureDisplay` 节点 + `dragonBones.EgretFactory.factory._dragonBonesDataMap` 缓存 |
+| **DragonBones 导出** | MCP `downloadDragonBones`：`{key}_ske.json` + `{key}_tex.json` + `{key}_{i}.png` + `runtime_summary.json` → zip |
+| **Spine 列表** | MCP `listSpines`：`window.spine.SkeletonAnimation/SkeletonRenderer` 节点 |
+| **Spine 导出** | MCP `downloadSpine`：`.json/.skel` + `.atlas` + `_{i}.png` + `runtime_summary.json` → zip |
 | 暂停 | `egret.ticker.pause` / `resume` |
 | 截图 | `stage.$canvas` 或 `.egret-player canvas` |
 | MCP | `window.__cocosInspectorApi`（与 Cocos 共用协议） |
@@ -54,6 +58,46 @@ downloadResource(nameOrUrl)
        （从已解码 HTMLImageElement 绘制整张源图，等价参考插件 le()）
 ```
 
+### DragonBones 数据通道
+
+```
+listDragonBones()
+  → 遍历场景树找 EgretArmatureDisplay/ArmatureDisplay 节点
+  → 取 node.armature.name + node.armature.animation.getAnimationNames()
+  → 合并 dragonBones.EgretFactory.factory._dragonBonesDataMap 已注册的 key
+       （cache 项 id 形如 egret-db-cache-{key}）
+
+exportDragonBones(id)
+  → 节点 _dragonBonesData  → {key}_ske.json
+  → factory._dragonBonesDataMap[key].rawData → {key}_ske.json
+  → factory._textureAtlasDataMap[key][i]
+       .rawData / .textureAtlasRawData → {key}_tex.json
+       .renderTexture / .texture → {key}_{i}.png
+            （extractWholeSourceToPng 优先；URL 回退写入 _url_list.txt）
+  → runtime_summary.json（标注"非原始工程文件，仅供对照"）
+  → JSZip → zipBase64 inline
+```
+
+### Spine 数据通道
+
+```
+listSpines()
+  → 遍历场景树找 spine.SkeletonAnimation/SkeletonRenderer 节点
+  → 取 skeletonData.skeletonJson.animations 的 keys 作为 anims
+
+exportSpine(id)
+  → skeletonData.skeletonJsonStr → {baseName}.json
+  → skeletonData.skeletonJson    → {baseName}.json
+  → skeletonData._nativeAsset    → {baseName}.skel (base64)
+  → skeletonData.atlasText       → {baseName}.atlas
+  → skeletonData.textures[i]     → {baseName}_{i}.png
+       （extractWholeSourceToPng 优先；URL 回退写入 _url_list.txt）
+  → runtime_summary.json
+  → JSZip → zipBase64 inline
+```
+
+> 参考：`hgjkfcojmobceiihkjifeioioffcmond` 1.0.19 `inspector.js` 的 `Qe/Ae/Ee/le/ce/mt/ne/pe` 函数链。
+
 ## 限制
 
 - **不做** 属性编辑、鼠标拾取、FPS 显示、FairyGUI（与参考插件对齐，仅核心还原）
@@ -72,6 +116,10 @@ node tools/verify-egret-cdp.mjs https://qp.bydrqp.com/bkby/platform/1020/index.h
 - 第一个贴图纹理提取结果
 - 资源清单前 5 项
 - 任一 image 资源的原始字节下载结果（字节数、mime、源 URL）
+- DragonBones 清单（场景节点 + 工厂缓存）；首项导出 zip 验证（文件清单 + 日志 + 部分缺失提示）
+- Spine 清单（Egret 5.x 通常未加载 spine，验证兼容性不抛错）
 - 面板截图 `D:/work/egret-verify-shot.png`
+
+> bydrqp 捕鱼游戏加载界面尚未实例化 ArmatureDisplay 时，`listDragonBones` 返回空数组；资源清单已识别 `.dbbin`/`_tex.json`，可通过 `downloadResource` 拿到原始字节（验证实测：38812B 骨架 + 1871B 图集）。主场景特效加载后会通过同一通道自动导出。
 
 参考插件（已逆向）：`hgjkfcojmobceiihkjifeioioffcmond` 1.0.19 的 `inspector.js` 中 `le()` / `ce()` / `de()` 提供了纹理→整图回退思路。
