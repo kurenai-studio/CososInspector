@@ -98,6 +98,7 @@ const BRIDGE_TIMEOUT_BY_METHOD = {
   listSpines: 120_000,
   listBmfonts: 120_000,
   listDragonBones: 120_000,
+  downloadSceneAssets: 600_000,
   exportSceneSnapshot: 300_000,
 };
 
@@ -306,6 +307,22 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           cdpPort: { type: 'number' },
         },
         required: ['nameOrUrl'],
+      },
+    },
+    {
+      name: 'cocos_download_scene_assets',
+      description:
+        '批量打包下载当前场景用到的所有图片 + DragonBones + Spine 为单个 zip（Egret 专用）',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          outPath: { type: 'string', description: '输出 .zip 路径（可选）' },
+          delivery: { type: 'string', enum: ['share', 'inline'] },
+          pageUrlMatch: { type: 'string' },
+          domain: { type: 'string' },
+          wsPort: { type: 'number' },
+          cdpPort: { type: 'number' },
+        },
       },
     },
     {
@@ -920,6 +937,52 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 height: res.height,
                 filename: res.filename,
                 extractMethod: res.detail?.extractMethod,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+
+    if (name === 'cocos_download_scene_assets') {
+      const res = await apiCall('downloadSceneAssets', [], opts);
+      if (!res?.ok) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+          isError: true,
+        };
+      }
+      const outPath = args.outPath ? resolve(args.outPath) : null;
+      let shareRel = null;
+      if (res.zipBase64) {
+        const zipName = res.zipName ?? `scene_assets.zip`;
+        shareRel = writeShareOutput(zipName, res.zipBase64);
+        if (outPath) writeBase64File(outPath, res.zipBase64);
+      } else {
+        return {
+          content: [
+            { type: 'text', text: JSON.stringify({ ok: false, error: '响应无 zipBase64' }, null, 2) },
+          ],
+          isError: true,
+        };
+      }
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                ok: true,
+                shareDir: getShareDir(),
+                sharePath: shareRel,
+                shareUrl: shareRel ? shareFileUrl(shareRel) : undefined,
+                saved: outPath ?? undefined,
+                zipName: res.zipName,
+                fileCount: res.files?.length,
+                log: res.log,
+                reason: res.reason,
               },
               null,
               2
