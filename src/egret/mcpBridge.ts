@@ -37,6 +37,9 @@ import {
 } from './resources';
 import { getEgretCanvas, getEgretVersion } from './runtime';
 import type { EgretDisplayObject } from './runtime';
+import { listDragonBones, exportDragonBones } from './dragonBonesExport';
+import { listSpines, exportSpine } from './spineExport';
+import type { SkeletonExportResult } from './skeletonCommon';
 
 export type EgretTextureDownloadResult =
   | {
@@ -253,6 +256,26 @@ export const egretInspectorMcpApi = {
 
   async screenshot() {
     return this.captureGameScreenshot();
+  },
+
+  /** 列出场景与缓存中的 DragonBones 资源 */
+  listDragonBones() {
+    return listDragonBones();
+  },
+
+  /** 导出指定 DragonBones 资源为 zip（base64 inline） */
+  async downloadDragonBones(id: string): Promise<SkeletonExportResult> {
+    return exportDragonBones(id);
+  },
+
+  /** 列出场景中的 Spine 资源 */
+  listSpines() {
+    return listSpines();
+  },
+
+  /** 导出指定 Spine 资源为 zip（base64 inline） */
+  async downloadSpine(id: string): Promise<SkeletonExportResult> {
+    return exportSpine(id);
   },
 };
 
