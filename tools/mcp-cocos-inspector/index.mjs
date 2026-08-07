@@ -276,6 +276,39 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: 'cocos_list_resources',
+      description:
+        '列出 RES 清单中的资源（含运行时已加载但未在 alias 的图源 URL）。Egret 专用',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', description: '上限，默认 100' },
+          pageUrlMatch: { type: 'string' },
+          domain: { type: 'string' },
+          wsPort: { type: 'number' },
+          cdpPort: { type: 'number' },
+        },
+      },
+    },
+    {
+      name: 'cocos_download_resource',
+      description:
+        '下载原始资源文件字节（.dbbin/.json/.png/.jpg 等）。优先 RES.config 解析 + 页内 fetch；失败时从已解码 HTMLImageElement 整图导出',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          nameOrUrl: { type: 'string', description: '资源别名（如 eff_bkbyH5_loading_ske_dbbin）或完整 URL' },
+          nodeId: { type: 'string', description: '可选：fetch 失败时优先从此节点回退整图导出' },
+          outPath: { type: 'string', description: '输出文件路径（可选）' },
+          pageUrlMatch: { type: 'string' },
+          domain: { type: 'string' },
+          wsPort: { type: 'number' },
+          cdpPort: { type: 'number' },
+        },
+        required: ['nameOrUrl'],
+      },
+    },
+    {
       name: 'cocos_download_spine',
       description:
         '从试玩页导出 Spine zip（骨架+atlas+纹理）。默认 share 通道；可 outPath 落盘',
@@ -720,6 +753,67 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const list = await apiCall('listDragonBones', [], opts);
       return {
         content: [{ type: 'text', text: JSON.stringify(list, null, 2) }],
+      };
+    }
+
+    if (name === 'cocos_list_resources') {
+      const limit = args.limit != null ? Number(args.limit) : 100;
+      const list = await apiCall('listResources', [limit], opts);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(list, null, 2) }],
+      };
+    }
+
+    if (name === 'cocos_download_resource') {
+      const dlOpts = args.nodeId ? { nodeId: args.nodeId } : undefined;
+      const res = await apiCall('downloadResource', [args.nameOrUrl, dlOpts], opts);
+      if (!res?.ok) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+          isError: true,
+        };
+      }
+      const outPath = args.outPath ? resolve(args.outPath) : null;
+      let shareRel = res.sharePath ?? null;
+      if (res.delivery === 'share' && res.sharePath) {
+        if (outPath) {
+          mkdirSync(dirname(outPath), { recursive: true });
+          copyFileSync(resolveSharePath(res.sharePath), outPath);
+        }
+      } else if (res.base64) {
+        const filename = res.filename ?? args.nameOrUrl.replace(/[^\w.-]/g, '_');
+        shareRel = writeShareOutput(filename, res.base64);
+        if (outPath) writeBase64File(outPath, res.base64);
+      } else {
+        return {
+          content: [
+            { type: 'text', text: JSON.stringify({ ok: false, error: '响应无 sharePath/base64' }, null, 2) },
+          ],
+          isError: true,
+        };
+      }
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                ok: true,
+                delivery: res.delivery,
+                shareDir: getShareDir(),
+                sharePath: shareRel,
+                shareUrl: res.shareUrl ?? (shareRel ? shareFileUrl(shareRel) : undefined),
+                saved: outPath ?? undefined,
+                filename: res.filename,
+                bytes: res.detail?.bytes,
+                mime: res.detail?.mime,
+                sourceUrl: res.detail?.sourceUrl,
+              },
+              null,
+              2
+            ),
+          },
+        ],
       };
     }
 
