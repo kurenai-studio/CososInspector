@@ -93,9 +93,11 @@ const BRIDGE_TIMEOUT_BY_METHOD = {
   downloadTexture: 300_000,
   downloadSpine: 300_000,
   downloadBmfont: 180_000,
+  downloadDragonBones: 300_000,
   listSprites: 180_000,
   listSpines: 120_000,
   listBmfonts: 120_000,
+  listDragonBones: 120_000,
   exportSceneSnapshot: 300_000,
 };
 
@@ -260,6 +262,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: 'cocos_list_dragon_bones',
+      description:
+        '列出场景与缓存中的 DragonBones 资源（Egret 引擎：ArmatureDisplay 节点 + 工厂 _dragonBonesDataMap）',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          pageUrlMatch: { type: 'string' },
+          domain: { type: 'string' },
+          wsPort: { type: 'number' },
+          cdpPort: { type: 'number' },
+        },
+      },
+    },
+    {
       name: 'cocos_download_spine',
       description:
         '从试玩页导出 Spine zip（骨架+atlas+纹理）。默认 share 通道；可 outPath 落盘',
@@ -288,6 +304,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           nodeId: { type: 'string' },
           outPath: { type: 'string', description: '输出 .zip 路径（可选）' },
           bmfontIndex: { type: 'number' },
+          delivery: { type: 'string', enum: ['share', 'inline'] },
+          pageUrlMatch: { type: 'string' },
+          domain: { type: 'string' },
+          wsPort: { type: 'number' },
+          cdpPort: { type: 'number' },
+        },
+        required: ['nodeId'],
+      },
+    },
+    {
+      name: 'cocos_download_dragon_bones',
+      description:
+        '导出 DragonBones 资源为 zip（_ske.json + _tex.json + 纹理 png + runtime_summary）。Egret 引擎专用，nodeId 可为场景节点 id 或 egret-db-cache-{name}',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          nodeId: { type: 'string', description: 'listDragonBones 返回的 id' },
+          outPath: { type: 'string', description: '输出 .zip 路径（可选）' },
           delivery: { type: 'string', enum: ['share', 'inline'] },
           pageUrlMatch: { type: 'string' },
           domain: { type: 'string' },
@@ -682,6 +716,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
+    if (name === 'cocos_list_dragon_bones') {
+      const list = await apiCall('listDragonBones', [], opts);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(list, null, 2) }],
+      };
+    }
+
     if (name === 'cocos_get_scene_tree') {
       await waitExt(opts);
       const tree = await apiCall('getSceneTree', [], opts);
@@ -794,11 +835,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    if (name === 'cocos_download_spine' || name === 'cocos_download_bmfont') {
+    if (name === 'cocos_download_spine' || name === 'cocos_download_bmfont' || name === 'cocos_download_dragon_bones') {
       const target = await resolveBridgeTarget(connOpts(opts ?? {}));
       const delivery = args.delivery ?? 'share';
       const method =
-        name === 'cocos_download_spine' ? 'downloadSpine' : 'downloadBmfont';
+        name === 'cocos_download_spine' ? 'downloadSpine'
+          : name === 'cocos_download_bmfont' ? 'downloadBmfont'
+          : 'downloadDragonBones';
       const dlOpts = {
         delivery,
         wsPort: target.wsPort,
@@ -827,12 +870,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const zipName = res.zipName ?? `${args.nodeId}.zip`;
         shareRel = writeShareOutput(zipName, res.base64);
         if (outPath) writeBase64File(outPath, res.base64);
+      } else if (res.zipBase64) {
+        // Egret 骨骼导出：直接 inline base64 zip
+        const zipName = res.zipName ?? `${args.nodeId}.zip`;
+        shareRel = writeShareOutput(zipName, res.zipBase64);
+        if (outPath) writeBase64File(outPath, res.zipBase64);
       } else {
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({ ok: false, error: '响应无 sharePath/base64' }, null, 2),
+              text: JSON.stringify({ ok: false, error: '响应无 sharePath/base64/zipBase64' }, null, 2),
             },
           ],
           isError: true,
@@ -851,7 +899,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 shareUrl: res.shareUrl ?? (shareRel ? shareFileUrl(shareRel) : undefined),
                 saved: outPath ?? undefined,
                 zipName: res.zipName,
-                fileCount: res.fileCount,
+                fileCount: res.fileCount ?? res.files?.length,
+                log: res.log,
+                reason: res.reason,
               },
               null,
               2
