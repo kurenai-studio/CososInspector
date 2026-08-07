@@ -79,7 +79,41 @@ declare global {
       TextField?: unknown;
       DisplayObject?: unknown;
     };
+    dragonBones?: {
+      EgretFactory?: { factory?: DragonBonesFactoryLike } | null;
+      BaseFactory?: { factory?: DragonBonesFactoryLike } | null;
+      EgretArmatureDisplay?: unknown;
+      ArmatureDisplay?: unknown;
+      DragonBonesAsset?: unknown;
+      DragonAtlasAsset?: unknown;
+    };
+    spine?: {
+      SkeletonAnimation?: unknown;
+      SkeletonRenderer?: unknown;
+      SkeletonData?: unknown;
+    };
   }
+}
+
+/** DragonBones 工厂（5.x EgretFactory / BaseFactory 共用此形状） */
+export interface DragonBonesFactoryLike {
+  _dragonBonesDataMap?: Record<string, DragonBonesDataEntry>;
+  dragonBonesDataMap?: Record<string, DragonBonesDataEntry>;
+  _textureAtlasDataMap?: Record<string, DragonBonesAtlasEntry[] | DragonBonesAtlasEntry>;
+  textureAtlasDataMap?: Record<string, DragonBonesAtlasEntry[] | DragonBonesAtlasEntry>;
+}
+
+export interface DragonBonesDataEntry {
+  rawData?: unknown;
+  armature?: unknown;
+  name?: string;
+}
+
+export interface DragonBonesAtlasEntry {
+  rawData?: unknown;
+  textureAtlasRawData?: unknown;
+  renderTexture?: EgretTextureLike | null;
+  texture?: EgretTextureLike | null;
 }
 
 export type EgretTickerLike = {
