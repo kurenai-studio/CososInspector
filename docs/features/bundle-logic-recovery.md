@@ -114,3 +114,14 @@ node tools/mcp-cocos-inspector/fix-image-shell-dirs.mjs <工程>/assets \
 ```
 
 详见 [runtime-dump-reverse.md](./runtime-dump-reverse.md) 同名章节。
+
+## Creator：Spine 源文件化（必要）
+
+cc-reverse 3.x 不拆 Spine 三件套。自研后处理：
+
+```bash
+node tools/mcp-cocos-inspector/fix-spine-from-import.mjs <工程>/assets \
+  --bundle-root <dump>/build/assets/resources
+```
+
+详见 [runtime-dump-reverse.md](./runtime-dump-reverse.md)。

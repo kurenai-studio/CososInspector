@@ -81,6 +81,21 @@ node restore-scripts-l3.mjs .../slotgame --out .../slotgame-restored \
   --dump .../manifest.json
 ```
 
+## Creator 工程：Spine 源文件化（必要步骤）
+
+cc-reverse **3.x** 不会像 2.x 那样把 `sp.SkeletonData` 拆成
+`.json + .atlas + .png`，只会留下 library JSON / atlas 空壳。
+
+在 image 空壳修复之后、打开/刷新 Spine 前执行：
+
+```bash
+node tools/mcp-cocos-inspector/fix-spine-from-import.mjs <工程>/assets \
+  --bundle-root <dump>/build/assets/resources
+```
+
+真源：`config.packs` + `import/`（rehydrate）中的 `_atlasText` / `_skeletonJson`。  
+产出：同目录 Spine 三件套，`importer: spine-data`；`legendwin2`/`ultrawin2` 仅为贴图页，属原包设计。
+
 ## Creator 工程：image 空壳目录修复（必要步骤）
 
 `cc-reverse --assets-only` 常把 Image 展开成「目录 + texture/spriteFrame meta」，
@@ -114,4 +129,5 @@ node tools/mcp-cocos-inspector/fix-image-shell-dirs.mjs <工程>/assets \
 - `tools/mcp-cocos-inspector/readableize-system-register.mjs`
 - `tools/mcp-cocos-inspector/restore-scripts-l3.mjs`
 - `tools/mcp-cocos-inspector/fix-image-shell-dirs.mjs`
+- `tools/mcp-cocos-inspector/fix-spine-from-import.mjs`
 - MCP：`index.mjs` → `cocos_dump_runtime`
