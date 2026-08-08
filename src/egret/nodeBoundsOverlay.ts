@@ -17,7 +17,11 @@ function ensureOverlay(): HTMLDivElement {
   return overlayRoot;
 }
 
-/** Egret 节点屏幕矩形（用 $getTransformedBounds(stage) + canvas 偏移/缩放） */
+/** Egret 节点屏幕矩形
+ * 坐标换算：$getTransformedBounds(stage) 返回 stage 坐标系（逻辑像素）下的矩形，
+ * canvas CSS 大小 / stage 像素 = stage→CSS 缩放比（picker screenToStage 的逆运算）。
+ * 不能用 $canvasScaleX/Y（那是 devicePixelRatio，不是 stage→CSS）。
+ */
 function getNodeScreenRect(node: EgretDisplayObject): { left: number; top: number; w: number; h: number } | null {
   const canvas = getEgretCanvas();
   if (!canvas) return null;
@@ -28,16 +32,19 @@ function getNodeScreenRect(node: EgretDisplayObject): { left: number; top: numbe
   const anyNode = node as any;
   const getBounds = anyNode.$getTransformedBounds;
   if (typeof getBounds !== 'function') return null;
+  const stageW = Number(stage.stageWidth) || rect.width;
+  const stageH = Number(stage.stageHeight) || rect.height;
+  if (!stageW || !stageH) return null;
   try {
     const b = getBounds.call(node, stage);
-    // 5.x WebGL canvas 可能带 scale
-    const stageScaleX = (stage as { $canvasScaleX?: number }).$canvasScaleX ?? 1;
-    const stageScaleY = (stage as { $canvasScaleY?: number }).$canvasScaleY ?? 1;
+    // stage 坐标 → CSS 像素：乘 CSS/Stage 比例（兼容 canvas CSS 大小 ≠ stage 大小 + devicePixelRatio）
+    const scaleX = rect.width / stageW;
+    const scaleY = rect.height / stageH;
     return {
-      left: rect.left + b.x * stageScaleX,
-      top: rect.top + b.y * stageScaleY,
-      w: b.width * stageScaleX,
-      h: b.height * stageScaleY,
+      left: rect.left + b.x * scaleX,
+      top: rect.top + b.y * scaleY,
+      w: b.width * scaleX,
+      h: b.height * scaleY,
     };
   } catch {
     return null;

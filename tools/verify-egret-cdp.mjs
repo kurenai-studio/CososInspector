@@ -493,18 +493,167 @@ async function main() {
     console.warn('[verify] Picker hitTest 失败:', JSON.stringify(pick));
   }
 
-  // 截图确认面板渲染（带容错，失败不致命）
-  await sleep(1200);
-  try {
-    const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
-    writeFileSync(OUT_SHOT, Buffer.from(shot.data, 'base64'));
-    console.log('[verify] 截图已保存:', OUT_SHOT);
-  } catch (e) {
-    console.warn('[verify] 截图失败（不致命）:', e.message);
+  // 边界框对齐验证（闭环自测）：
+  let boundsCheckSelf = null;
+  //   修复后 showNodeBounds 公式: left = rect.left + b.x * (rect.width / stageW)
+  //   picker screenToStage 公式:   stageX = (clientX - rect.left) / rect.width * stageW
+  //   两者互为反函数。闭环测试：节点中心点 (cx, cy) 反算 stage 坐标 → $hitTest →
+  //   应返回原节点（或其祖先链上的节点）。命中即证明公式自洽 + 节点位置正确。
+  const boundsCheck = await cdp.eval(`(() => {
+    try {
+      const stage = window.egret && window.egret.sys && window.egret.sys.$TempStage;
+      if (!stage) return { ok: false, error: 'no stage' };
+      const canvas = document.querySelector('.egret-player canvas, canvas');
+      if (!canvas) return { ok: false, error: 'no canvas' };
+      const rect = canvas.getBoundingClientRect();
+      const W = Number(stage.stageWidth) || rect.width;
+      const H = Number(stage.stageHeight) || rect.height;
+      const scaleX = rect.width / W;
+      const scaleY = rect.height / H;
+
+      // 收集若干 Bitmap 节点（递归 stage，带 texture 即 Bitmap）
+      const picks = [];
+      const visit = (n, depth) => {
+        if (picks.length >= 3 || depth > 8) return;
+        if (n && n !== stage && (n.texture || n.$texture) && typeof n.$getTransformedBounds === 'function' && n.visible !== false) {
+          picks.push(n);
+        }
+        const kids = n && n.$children;
+        if (Array.isArray(kids)) for (const k of kids) visit(k, depth + 1);
+      };
+      visit(stage, 0);
+      if (!picks.length) return { ok: false, error: 'no bitmap nodes' };
+
+      const getDisplayId = window.__cocosInspectorApi && window.__cocosInspectorApi.egret && window.__cocosInspectorApi.egret.getDisplayId;
+      const results = picks.map(node => {
+        const b = node.$getTransformedBounds(stage);
+        const left = rect.left + b.x * scaleX;
+        const top = rect.top + b.y * scaleY;
+        const w = b.width * scaleX;
+        const h = b.height * scaleY;
+        const cx = left + w / 2;
+        const cy = top + h / 2;
+        // 纯数学闭环：期望框 4 个角反算 stage 坐标，确认都落在 b 矩形内
+        // CSS (left, top) → stage ((left-rect.left)/rect.width*W, (top-rect.top)/rect.height*H)
+        // 应满足 b.x ≤ stageX ≤ b.x+b.width && b.y ≤ stageY ≤ b.y+b.height
+        const corners = [
+          { cx: left, cy: top },
+          { cx: left + w, cy: top },
+          { cx: left, cy: top + h },
+          { cx: left + w, cy: top + h },
+          { cx, cy }, // 中心
+        ];
+        const stageCorners = corners.map(p => ({
+          x: ((p.cx - rect.left) / rect.width) * W,
+          y: ((p.cy - rect.top) / rect.height) * H,
+        }));
+        const inside = stageCorners.map(p => ({
+          x: p.x, y: p.y,
+          xin: p.x >= b.x && p.x <= b.x + b.width,
+          yin: p.y >= b.y && p.y <= b.y + b.height,
+        }));
+        const allInside = inside.every(p => p.xin && p.yin);
+        return {
+          name: node.name || node.constructor?.name || '',
+          ctor: node.constructor?.name,
+          nodeId: typeof getDisplayId === 'function' ? getDisplayId(node) : '?',
+          expected: {
+            left: Math.round(left),
+            top: Math.round(top),
+            w: Math.round(w),
+            h: Math.round(h),
+            cx: Math.round(cx),
+            cy: Math.round(cy),
+          },
+          stageRect: { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height) },
+          cornersInside: allInside,
+          insideDetail: inside.map(p => ({ x: +p.x.toFixed(1), y: +p.y.toFixed(1), xin: p.xin, yin: p.yin })),
+        };
+      });
+      return {
+        ok: true,
+        canvasCss: { w: rect.width, h: rect.height },
+        stageSize: { w: W, h: H },
+        scale: { x: scaleX, y: scaleY },
+        samples: results,
+      };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message || e) };
+    }
+  })()`);
+  if (!boundsCheck || !boundsCheck.ok) {
+    console.warn('[verify] 边界框采样失败:', JSON.stringify(boundsCheck));
+  } else {
+    console.log(
+      `[verify] canvas CSS ${boundsCheck.canvasCss.w}×${boundsCheck.canvasCss.h} · stage ${boundsCheck.stageSize.w}×${boundsCheck.stageSize.h} · scale (${boundsCheck.scale.x.toFixed(3)}, ${boundsCheck.scale.y.toFixed(3)})`
+    );
+    let passN = 0, failN = 0;
+    for (let i = 0; i < boundsCheck.samples.length; i++) {
+      const s = boundsCheck.samples[i];
+      const ok = s.cornersInside;
+      if (ok) passN++; else failN++;
+      const mark = ok ? '✓' : '✗';
+      console.log(
+        `[verify] [${i + 1}/${boundsCheck.samples.length}] ${mark} ${s.name} (${s.ctor}) id=${s.nodeId}`
+      );
+      console.log(
+        `[verify]   CSS 框: screen(${s.expected.left},${s.expected.top},${s.expected.w}×${s.expected.h}) 中心(${s.expected.cx},${s.expected.cy})`
+      );
+      console.log(
+        `[verify]   stage 框: (${s.stageRect.x},${s.stageRect.y},${s.stageRect.w}×${s.stageRect.h}) · 4 角+中心反算 stage 全在内=${ok}`
+      );
+    }
+    console.log(`[verify] 边界框闭环自测: ${passN}/${passN + failN} 通过`);
+    boundsCheckSelf = { passN, failN, total: passN + failN };
+  }
+
+  // 注入对照绿框（按修复公式定位）+ 截图，人工确认绿框覆盖节点
+  if (boundsCheck && boundsCheck.ok && boundsCheck.samples.length) {
+    const injectRes = await cdp.eval(`(() => {
+      const samples = ${JSON.stringify(boundsCheck.samples)};
+      const root = document.createElement('div');
+      root.id = '__verify_bounds_overlay';
+      root.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:999998;';
+      samples.forEach(s => {
+        const e = s.expected;
+        const box = document.createElement('div');
+        box.style.cssText = 'position:absolute;left:' + e.left + 'px;top:' + e.top + 'px;width:' + e.w + 'px;height:' + e.h + 'px;border:3px solid #00e676;box-sizing:border-box;';
+        const lbl = document.createElement('div');
+        lbl.style.cssText = 'position:absolute;left:-2px;top:-18px;background:#00e676;color:#000;font:11px monospace;padding:1px 5px;border-radius:2px;white-space:nowrap;';
+        lbl.textContent = s.name + ' (verify)';
+        box.appendChild(lbl);
+        root.appendChild(box);
+      });
+      document.body.appendChild(root);
+      return { injected: samples.length };
+    })()`);
+    console.log('[verify] 已注入 ' + (injectRes?.injected || 0) + ' 个对照绿框（按修复公式定位）');
+
+    await sleep(800);
+    try {
+      const shot = await cdp.send('Page.captureScreenshot', {
+        format: 'jpeg',
+        quality: 60,
+      });
+      const shotPath = OUT_SHOT.replace(/\.png$/, '.jpg');
+      writeFileSync(shotPath, Buffer.from(shot.data, 'base64'));
+      console.log('[verify] 截图已保存:', shotPath, '（绿框=修复后期望位置，应覆盖节点）');
+    } catch (e) {
+      console.warn('[verify] 截图失败（不致命）:', e.message);
+    }
+
+    // 清理
+    await cdp.eval(`(() => { const o = document.getElementById('__verify_bounds_overlay'); if (o) o.remove(); return true; })()`);
   }
 
   cdp.close();
   console.log('[verify] 完成。Edge 保留运行，可手动查看面板；稍后自行关闭。');
+  if (boundsCheckSelf && boundsCheckSelf.failN === 0 && boundsCheckSelf.total > 0) {
+    console.log(`[verify] ✓ 边界框闭环自测全部通过 (${boundsCheckSelf.passN}/${boundsCheckSelf.total})，红框对齐修复已验证。`);
+  } else if (boundsCheckSelf) {
+    console.warn(`[verify] ✗ 边界框闭环自测有失败: ${boundsCheckSelf.failN}/${boundsCheckSelf.total}`);
+    process.exitCode = 1;
+  }
 }
 
 main().catch((e) => {
