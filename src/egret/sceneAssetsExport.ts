@@ -113,6 +113,42 @@ export function collectSceneAtlasInfo(): AtlasInfo[] {
   return Array.from(byUrl.values());
 }
 
+/**
+ * 收集指定子树所有图集 + 每个图集下的 sprite 区域。
+ * 与 collectSceneAtlasInfo 同样逻辑，但仅遍历以 root 为根的子树（不含 root 之外的节点）。
+ */
+export function collectSubtreeAtlasInfo(root: EgretDisplayObject): AtlasInfo[] {
+  const byUrl = new Map<string, AtlasInfo>();
+  const seen = new Set<string>();
+  walkDisplayTree(root, (node) => {
+    const tex = getNodeTexture(node);
+    if (!tex) return;
+    const url = getTextureSourceUrl(tex);
+    if (!url) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anyTex = tex as any;
+    const x = Number(anyTex.$bitmapX ?? 0);
+    const y = Number(anyTex.$bitmapY ?? 0);
+    const w = Number(anyTex.$bitmapWidth ?? anyTex.textureWidth ?? 0);
+    const h = Number(anyTex.$bitmapHeight ?? anyTex.textureHeight ?? 0);
+    if (w <= 0 || h <= 0) return;
+    const key = `${url}|${x},${y},${w}x${h}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    let info = byUrl.get(url);
+    if (!info) {
+      info = { url, filename: urlToFilename(url, 'atlas.png'), sprites: [] };
+      byUrl.set(url, info);
+    }
+    const name = getDisplayName(node) || String(node.name || `sprite_${info.sprites.length}`);
+    info.sprites.push({
+      name, x, y, w, h,
+      nodeId: getDisplayId(node),
+    });
+  });
+  return Array.from(byUrl.values());
+}
+
 /** 把 URL 转成相对路径文件名（去 query/hash） */
 function urlToFilename(url: string, fallback: string): string {
   try {

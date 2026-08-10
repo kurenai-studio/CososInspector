@@ -26,7 +26,7 @@ import { collectSpriteList } from './sprites';
 import { startPickMode, stopPickMode, isPickModeActive } from './nodePicker';
 import { getTextureSourceUrl, getNodeTexture } from './textureExtract';
 import { listDragonBonesUrls } from './dragonBonesExport';
-import { listSceneSpriteUrls, collectSceneAtlasInfo, type AtlasInfo } from './sceneAssetsExport';
+import { listSceneSpriteUrls, collectSceneAtlasInfo, collectSubtreeAtlasInfo, type AtlasInfo } from './sceneAssetsExport';
 import { collectResourceList } from './resources';
 
 declare const __INSPECTOR_VERSION__: string;
@@ -194,6 +194,7 @@ export class EgretInspector {
     const dlItems: Array<{ key: string; label: string }> = [
       { key: 'scene', label: '整场景下载原图' },
       { key: 'scene-atlas', label: '整场景图集还原（按 sprite 裁剪）' },
+      { key: 'node-subtree', label: '选中节点子树资源（图集+龙骨）' },
       { key: 'node-texture', label: '选中节点纹理 PNG' },
       { key: 'node-dragonbones', label: '选中节点龙骨 zip' },
       { key: 'resources', label: '资源 URL 清单 JSON' },
@@ -408,6 +409,78 @@ export class EgretInspector {
     return cleaned.length > 100 ? cleaned.slice(0, 100) : cleaned;
   }
 
+  /**
+   * 图集还原核心：收 atlases → 下载原图 → canvas 按 sprite 区域裁剪 → 写入 sprites/
+   * 同时把原图备份到 images/，atlas-manifest.json 备份区域信息。
+   * 返回 { written, errors, spriteDone, totalSprites }。
+   */
+  private async downloadAtlasesToDir(
+    atlases: AtlasInfo[],
+    dir: FileSystemDirectoryHandle
+  ): Promise<{ written: string[]; errors: string[]; spriteDone: number; totalSprites: number }> {
+    const written: string[] = [];
+    const errors: string[] = [];
+    const totalSprites = atlases.reduce((s, a) => s + a.sprites.length, 0);
+    if (atlases.length === 0) {
+      return { written, errors, totalSprites, spriteDone: 0 };
+    }
+    this.setStatus(`发现 ${atlases.length} 个图集 · ${totalSprites} 个 sprite，开始还原到 ${dir.name} …`);
+
+    // 写 manifest 备份（含图集 URL + sprite 区域，便于离线重做）
+    const manifest = atlases.map((a) => ({
+      url: a.url,
+      filename: a.filename,
+      sprites: a.sprites.map((s) => ({ name: s.name, x: s.x, y: s.y, w: s.w, h: s.h, nodeId: s.nodeId })),
+    }));
+    await this.writeFileToDir(dir, 'atlas-manifest.json', JSON.stringify(manifest, null, 2));
+
+    let spriteDone = 0;
+    for (const atlas of atlases) {
+      // fetch 原图 → Image
+      let img: HTMLImageElement;
+      try {
+        const res = await fetch(atlas.url, { mode: 'cors', credentials: 'omit' });
+        if (!res.ok) { errors.push(`${atlas.filename}: HTTP ${res.status}`); continue; }
+        const blob = await res.blob();
+        const urlObj = URL.createObjectURL(blob);
+        img = await this.loadImage(urlObj);
+        URL.revokeObjectURL(urlObj);
+      } catch (e) {
+        errors.push(`${atlas.filename}: ${(e as Error).message}`);
+        continue;
+      }
+      // 写原图备份
+      try {
+        const res2 = await fetch(atlas.url, { mode: 'cors', credentials: 'omit' });
+        if (res2.ok) {
+          const blob2 = await res2.blob();
+          await this.writeFileToDir(dir, `images/${atlas.filename}`, blob2);
+        }
+      } catch { /* ignore */ }
+
+      // 裁剪每个 sprite
+      for (const sp of atlas.sprites) {
+        try {
+          const png = await this.cropSprite(img, sp.x, sp.y, sp.w, sp.h);
+          await this.writeFileToDir(dir, `sprites/${this.safeName(sp.name)}.png`, png);
+          spriteDone++;
+          if (spriteDone % 10 === 0 || spriteDone === totalSprites) {
+            this.setStatus(`图集还原 ${spriteDone}/${totalSprites} …`);
+          }
+        } catch (e) {
+          errors.push(`sprite ${sp.name}: ${(e as Error).message}`);
+        }
+      }
+    }
+    written.push(`sprites/ (${spriteDone} 个)`, 'images/', 'atlas-manifest.json');
+    if (errors.length) {
+      this.setStatus(`图集还原完成: ${spriteDone}/${totalSprites} sprite → 目录 ${dir.name} · 失败 ${errors.length}`);
+    } else {
+      this.setStatus(`图集还原完成: ${spriteDone}/${totalSprites} sprite → 目录 ${dir.name}`);
+    }
+    return { written, errors, spriteDone, totalSprites };
+  }
+
   private async onDownload(key: string): Promise<void> {
     this.hideDownloadMenu();
     if (this.isDownloading) {
@@ -451,67 +524,62 @@ export class EgretInspector {
         });
         await Promise.all(workers);
       } else if (key === 'scene-atlas') {
-        // 图集还原：收 collectSceneAtlasInfo → 下载原图 → canvas 按 sprite 区域裁剪 → 写 sprites/
+        // 整场景图集还原：collectSceneAtlasInfo → downloadAtlasesToDir
         const atlases: AtlasInfo[] = collectSceneAtlasInfo();
         if (atlases.length === 0) throw new Error('场景中无图集 sprite');
+        const r = await this.downloadAtlasesToDir(atlases, dir);
+        r.written.forEach((w) => written.push(w));
+        r.errors.forEach((e) => errors.push(e));
+      } else if (key === 'node-subtree') {
+        // 选中节点子树下载：图集还原 + 龙骨（递归子节点）
+        const node = this.getSelectedNode();
+        if (!node) throw new Error('请先选中节点');
+        const atlases: AtlasInfo[] = collectSubtreeAtlasInfo(node);
+        // 子树龙骨节点：listDragonBonesUrls 直接递归子树里的 isArmatureDisplay
+        const dbIds: string[] = [];
+        const seenIds = new Set<string>();
+        const walk = (n: EgretDisplayObject | null | undefined): void => {
+          if (!n) return;
+          // isArmatureDisplay 在 dragonBonesExport 内部判断；这里只用 instanceof 简单试探
+          const ctor = n.constructor?.name || '';
+          if (/EgretArmatureDisplay|ArmatureDisplay/i.test(ctor)) {
+            const id = getDisplayId(n);
+            if (id && !seenIds.has(id)) {
+              seenIds.add(id);
+              dbIds.push(id);
+            }
+          }
+          const kids = (n as { $children?: EgretDisplayObject[] }).$children;
+          if (Array.isArray(kids)) for (const c of kids) walk(c);
+        };
+        walk(node);
         const totalSprites = atlases.reduce((s, a) => s + a.sprites.length, 0);
-        this.setStatus(`发现 ${atlases.length} 个图集 · ${totalSprites} 个 sprite，开始还原到 ${dir.name} …`);
+        this.setStatus(`子树: ${atlases.length} 图集 · ${totalSprites} sprite · ${dbIds.length} 龙骨节点 → 开始下载到 ${dir.name} …`);
 
-        // 写 manifest 备份（含图集 URL + sprite 区域，便于离线重做）
-        const manifest = atlases.map((a) => ({
-          url: a.url,
-          filename: a.filename,
-          sprites: a.sprites.map((s) => ({ name: s.name, x: s.x, y: s.y, w: s.w, h: s.h, nodeId: s.nodeId })),
-        }));
-        await this.writeFileToDir(dir, 'atlas-manifest.json', JSON.stringify(manifest, null, 2));
+        // 1) 图集还原
+        if (atlases.length > 0) {
+          const r = await this.downloadAtlasesToDir(atlases, dir);
+          r.written.forEach((w) => written.push(w));
+          r.errors.forEach((e) => errors.push(e));
+        }
 
-        // 逐图集处理（顺序，避免一次性 fetch 太多大图）
-        let spriteDone = 0;
-        const errors2: string[] = [];
-        for (const atlas of atlases) {
-          // fetch 原图 → Image
-          let img: HTMLImageElement;
-          try {
-            const res = await fetch(atlas.url, { mode: 'cors', credentials: 'omit' });
-            if (!res.ok) { errors2.push(`${atlas.filename}: HTTP ${res.status}`); continue; }
-            const blob = await res.blob();
-            const urlObj = URL.createObjectURL(blob);
-            img = await this.loadImage(urlObj);
-            URL.revokeObjectURL(urlObj);
-          } catch (e) {
-            errors2.push(`${atlas.filename}: ${(e as Error).message}`);
+        // 2) 龙骨节点 URL → fetch
+        for (const dbId of dbIds) {
+          const r = listDragonBonesUrls(dbId);
+          if (!r.ok || !r.urls || r.urls.length === 0) {
+            errors.push(`龙骨 ${dbId}: ${r.error || '无 URL'}`);
             continue;
           }
-          // 写原图备份
-          try {
-            const res2 = await fetch(atlas.url, { mode: 'cors', credentials: 'omit' });
-            if (res2.ok) {
-              const blob2 = await res2.blob();
-              await this.writeFileToDir(dir, `images/${atlas.filename}`, blob2);
-            }
-          } catch { /* ignore */ }
-
-          // 裁剪每个 sprite
-          for (const sp of atlas.sprites) {
+          const baseName = r.armatureName || dbId;
+          for (const u of r.urls) {
             try {
-              const png = await this.cropSprite(img, sp.x, sp.y, sp.w, sp.h);
-              await this.writeFileToDir(dir, `sprites/${this.safeName(sp.name)}.png`, png);
-              spriteDone++;
-              if (spriteDone % 10 === 0 || spriteDone === totalSprites) {
-                this.setStatus(`图集还原 ${spriteDone}/${totalSprites} …`);
-              }
+              await this.fetchAndWrite(u.url, dir, `dragonbones/${baseName}/${u.name}`);
+              written.push(`dragonbones/${baseName}/${u.name}`);
             } catch (e) {
-              errors2.push(`sprite ${sp.name}: ${(e as Error).message}`);
+              errors.push(`${u.name}: ${(e as Error).message}`);
             }
           }
         }
-        written.push(`sprites/ (${spriteDone} 个)`, 'images/', 'atlas-manifest.json');
-        if (errors2.length) {
-          this.setStatus(`图集还原完成: ${spriteDone}/${totalSprites} sprite → 目录 ${dir.name} · 失败 ${errors2.length}`);
-        } else {
-          this.setStatus(`图集还原完成: ${spriteDone}/${totalSprites} sprite → 目录 ${dir.name}`);
-        }
-        return;
       } else if (key === 'node-texture') {
         const node = this.getSelectedNode();
         if (!node) throw new Error('请先选中节点');

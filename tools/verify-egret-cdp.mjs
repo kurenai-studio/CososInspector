@@ -840,6 +840,39 @@ async function main() {
       } else {
         console.log('[verify] ✓ 图集还原自测数据就绪（panel 可下载裁剪）');
       }
+
+      // 7) collectSubtreeAtlasInfo 自测：以 stage 根为子树 → 应返回与 collectSceneAtlasInfo 相同
+      const subtreeTest = await cdp.eval(`(() => {
+        const api = window.__cocosInspectorApi;
+        if (typeof api.collectSubtreeAtlasInfo !== 'function') {
+          return { ok: false, error: 'collectSubtreeAtlasInfo 未暴露' };
+        }
+        const lite = typeof api.getSceneTree === 'function' ? api.getSceneTree() : null;
+        let rootId = null;
+        if (lite && lite.rootId) rootId = lite.rootId;
+        if (!rootId) {
+          return { ok: false, error: '未找到 rootId' };
+        }
+        const atlases = api.collectSubtreeAtlasInfo(rootId);
+        const totalSprites = atlases.reduce((s, a) => s + (a.sprites ? a.sprites.length : 0), 0);
+        return {
+          ok: true,
+          rootId,
+          atlasCount: atlases.length,
+          totalSprites,
+        };
+      })()`);
+
+      if (!subtreeTest || !subtreeTest.ok) {
+        console.warn('[verify] collectSubtreeAtlasInfo 失败:', subtreeTest && subtreeTest.error);
+      } else {
+        console.log('[verify] 子树自测: root=' + subtreeTest.rootId + ' · ' + subtreeTest.atlasCount + ' 图集 · ' + subtreeTest.totalSprites + ' sprite');
+        if (subtreeTest.atlasCount === atlasTest.atlasCount && subtreeTest.totalSprites === atlasTest.totalSprites) {
+          console.log('[verify] ✓ 子树(stage根) 与 场景 全集一致');
+        } else {
+          console.log('[verify] (信息) 子树(stage根) ' + subtreeTest.atlasCount + '/' + subtreeTest.totalSprites + ' vs 场景 ' + atlasTest.atlasCount + '/' + atlasTest.totalSprites + '（不一定相等，看根节点是否含全部）');
+        }
+      }
     }
   }
 

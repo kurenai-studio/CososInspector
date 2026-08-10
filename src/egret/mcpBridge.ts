@@ -40,7 +40,7 @@ import type { EgretDisplayObject } from './runtime';
 import { listDragonBones, exportDragonBones, listDragonBonesUrls } from './dragonBonesExport';
 import { listSpines, exportSpine } from './spineExport';
 import { exportSceneAssets } from './sceneAssetsExport';
-import { listSceneSpriteUrls, collectSceneAtlasInfo } from './sceneAssetsExport';
+import { listSceneSpriteUrls, collectSceneAtlasInfo, collectSubtreeAtlasInfo } from './sceneAssetsExport';
 import type { SkeletonExportResult } from './skeletonCommon';
 
 export type EgretTextureDownloadResult =
@@ -293,6 +293,15 @@ export const egretInspectorMcpApi = {
   /** 列出场景所有图集 + 每个图集下的 sprite 区域（用于图集还原） */
   collectSceneAtlasInfo() {
     return collectSceneAtlasInfo();
+  },
+
+  /** 收集指定节点子树所有图集 + sprite 区域（用于父节点下载） */
+  collectSubtreeAtlasInfo(nodeId: string) {
+    const root = getSceneRoot();
+    if (!root) return [];
+    const node = findDisplayById(root, nodeId);
+    if (!node) return [];
+    return collectSubtreeAtlasInfo(node);
   },
 
   /** 列出指定 DragonBones 节点引用的所有 CDN URL（ske/tex.json/tex.png） */
