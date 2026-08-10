@@ -38,6 +38,16 @@ function collectSceneSprites(): CollectedSprite[] {
   return out;
 }
 
+/** 公开 API：列出场景所有 Sprite 引用的 CDN URL（按 URL 去重） */
+export function listSceneSpriteUrls(): { name: string; url: string }[] {
+  return collectSceneSprites()
+    .filter((s): s is CollectedSprite & { url: string } => !!s.url)
+    .map((s) => ({
+      name: urlToFilename(s.url, `${s.nodeId}.png`),
+      url: s.url,
+    }));
+}
+
 /** 把 URL 转成相对路径文件名（去 query/hash） */
 function urlToFilename(url: string, fallback: string): string {
   try {

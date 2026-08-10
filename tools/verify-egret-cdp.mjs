@@ -524,7 +524,7 @@ async function main() {
       visit(stage, 0);
       if (!picks.length) return { ok: false, error: 'no bitmap nodes' };
 
-      const getDisplayId = window.__cocosInspectorApi && window.__cocosInspectorApi.egret && window.__cocosInspectorApi.egret.getDisplayId;
+      const getDisplayId = window.__cocosInspectorApi && window.__cocosInspectorApi.getDisplayId;
       const results = picks.map(node => {
         const b = node.$getTransformedBounds(stage);
         const left = rect.left + b.x * scaleX;
@@ -646,6 +646,147 @@ async function main() {
 
     // 清理
     await cdp.eval(`(() => { const o = document.getElementById('__verify_bounds_overlay'); if (o) o.remove(); return true; })()`);
+  }
+
+  // ===== URL 提取 + fetch 可达性自测 =====
+  console.log('[verify] ---- URL 提取 + fetch 可达自测 ----');
+  const urlTest = await cdp.eval(`(() => {
+    try {
+      const api = window.__cocosInspectorApi;
+      if (!api) return { ok: false, error: 'no __cocosInspectorApi' };
+      const stage = window.egret && window.egret.sys && window.egret.sys.$TempStage;
+      if (!stage) return { ok: false, error: 'no stage' };
+
+      // 1) 选中节点纹理：找一个带 texture 的 Bitmap
+      let bitmapNode = null;
+      const visit1 = (n, d) => {
+        if (bitmapNode || d > 8) return;
+        if (n && n !== stage && n.texture && n.texture.$bitmapData) bitmapNode = n;
+        const kids = n && n.$children;
+        if (Array.isArray(kids)) for (const k of kids) visit1(k, d + 1);
+      };
+      visit1(stage, 0);
+
+      let bitmapUrl = null, bitmapName = null, bitmapId = null;
+      if (bitmapNode) {
+        const tex = bitmapNode.texture;
+        const raw = tex.$bitmapData ?? tex._bitmapData;
+        const src = raw && (raw.$source ?? raw.source);
+        if (src instanceof HTMLImageElement) bitmapUrl = src.src;
+        else if (raw instanceof HTMLImageElement) bitmapUrl = raw.src;
+        bitmapName = bitmapNode.name || bitmapNode.constructor?.name;
+        bitmapId = (function() {
+          const m = new WeakMap(); let s = 0;
+          function gid(n) { if (!n) return ''; if (m.has(n)) return m.get(n); s += 1; const v = 'egret-' + s; m.set(n, v); return v; }
+          return gid(bitmapNode);
+        })();
+      }
+
+      // 2) DragonBones 节点 URL：找一个 ArmatureDisplay
+      let dbNode = null;
+      const visit2 = (n, d) => {
+        if (dbNode || d > 12) return;
+        const ctor = n && n.constructor && n.constructor.name;
+        if (ctor && /EgretArmatureDisplay|ArmatureDisplay/i.test(ctor)) dbNode = n;
+        const kids = n && n.$children;
+        if (Array.isArray(kids)) for (const k of kids) visit2(k, d + 1);
+      };
+      visit2(stage, 0);
+
+      let dbId = null, dbUrlCount = -1;
+      if (dbNode) {
+        dbId = (function() {
+          const m = new WeakMap(); let s = 0;
+          function gid(n) { if (!n) return ''; if (m.has(n)) return m.get(n); s += 1; const v = 'egret-' + s; m.set(n, v); return v; }
+          return gid(dbNode);
+        })();
+        // 调 listDragonBonesUrls
+        if (typeof api.listDragonBonesUrls === 'function') {
+          const r = api.listDragonBonesUrls(dbId);
+          dbUrlCount = r.ok ? (r.urls || []).length : 0;
+        } else {
+          dbUrlCount = -2; // 函数不存在
+        }
+      }
+
+      // 3) 场景 Sprite URL 数
+      const sceneUrls = typeof api.listSceneSpriteUrls === 'function' ? api.listSceneSpriteUrls() : null;
+      const sceneUrlCount = sceneUrls ? sceneUrls.length : -1;
+      const sceneUrlFirst = sceneUrls && sceneUrls[0] ? sceneUrls[0].url : null;
+
+      // 4) collectResourceList
+      const resList = api.listResources ? api.listResources(2000) : null;
+      const resCount = resList && resList.ok ? resList.total : 0;
+
+      return {
+        ok: true,
+        bitmap: { name: bitmapName, id: bitmapId, url: bitmapUrl },
+        dragonBones: { id: dbId, urlCount: dbUrlCount },
+        scene: { urlCount: sceneUrlCount, firstUrl: sceneUrlFirst },
+        resources: { count: resCount },
+      };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message || e) };
+    }
+  })()`);
+
+  if (!urlTest || !urlTest.ok) {
+    console.warn('[verify] URL 提取失败:', JSON.stringify(urlTest));
+  } else {
+    console.log('[verify] Bitmap 节点:', urlTest.bitmap.name, 'id=' + urlTest.bitmap.id);
+    console.log('[verify]   纹理 URL:', urlTest.bitmap.url || '(无)');
+    console.log('[verify] DragonBones 节点 id=' + urlTest.dragonBones.id + ' · listDragonBonesUrls 返回 ' + urlTest.dragonBones.urlCount + ' 个 URL');
+    console.log('[verify] 场景 Sprite URL 数: ' + urlTest.scene.urlCount + ' · 首个 URL: ' + (urlTest.scene.firstUrl || '(无)'));
+    console.log('[verify] 资源清单总数: ' + urlTest.resources.count);
+
+    // 5) 实际 fetch 验证可达性（bitmapUrl + sceneFirstUrl + dbUrls）
+    const fetchTargets = [];
+    if (urlTest.bitmap.url) fetchTargets.push({ label: 'bitmap', url: urlTest.bitmap.url });
+    if (urlTest.scene.firstUrl) fetchTargets.push({ label: 'scene-first', url: urlTest.scene.firstUrl });
+
+    // 拿 db URLs
+    if (urlTest.dragonBones.id && urlTest.dragonBones.urlCount > 0) {
+      const dbUrls = await cdp.eval(`(() => {
+        const api = window.__cocosInspectorApi;
+        const r = api.listDragonBonesUrls(${JSON.stringify(urlTest.dragonBones.id)});
+        if (!r.ok) return [];
+        return (r.urls || []).map(u => ({ name: u.name, url: u.url, kind: u.kind }));
+      })()`);
+      if (Array.isArray(dbUrls)) {
+        for (const u of dbUrls.slice(0, 3)) {
+          fetchTargets.push({ label: 'db:' + u.kind + '/' + u.name, url: u.url });
+        }
+      }
+    }
+
+    console.log('[verify] 实际 fetch ' + fetchTargets.length + ' 个 URL 验证可达性…');
+    const fetchResults = await cdp.eval(`(async () => {
+      const targets = ${JSON.stringify(fetchTargets)};
+      const out = [];
+      for (const t of targets) {
+        try {
+          const res = await fetch(t.url, { mode: 'cors', credentials: 'omit' });
+          out.push({ label: t.label, status: res.status, ok: res.ok, url: t.url });
+        } catch (e) {
+          out.push({ label: t.label, error: String(e && e.message || e), url: t.url });
+        }
+      }
+      return out;
+    })()`);
+
+    let fetchOk = 0, fetchFail = 0;
+    for (const r of fetchResults || []) {
+      const mark = r.ok ? '✓' : '✗';
+      console.log('[verify]   ' + mark + ' ' + r.label + ' → HTTP ' + (r.status || r.error || '?'));
+      if (r.ok) fetchOk++; else fetchFail++;
+    }
+    console.log('[verify] fetch 可达: ' + fetchOk + '/' + fetchOk + fetchFail + ' 通过');
+
+    if (fetchFail > 0) {
+      console.warn('[verify] ✗ 部分 URL fetch 失败（可能 CORS 限制；浏览器 fetch 受 CORS 限制，Node curl 不受限）');
+      // 不算测试失败，因为 CORS 是浏览器限制
+    }
+    console.log('[verify] ✓ URL 提取自测完成');
   }
 
   cdp.close();

@@ -23,14 +23,11 @@ import {
   setNodeActive,
 } from './sceneTree';
 import { collectSpriteList } from './sprites';
-import { getNodeTexture } from './textureExtract';
 import { startPickMode, stopPickMode, isPickModeActive } from './nodePicker';
-import { extractNodeTextureToPng } from './textureExtract';
-import { exportDragonBones } from './dragonBonesExport';
+import { getTextureSourceUrl, getNodeTexture } from './textureExtract';
+import { listDragonBonesUrls } from './dragonBonesExport';
+import { listSceneSpriteUrls } from './sceneAssetsExport';
 import { collectResourceList } from './resources';
-import { exportSceneAssets } from './sceneAssetsExport';
-import type { SkeletonExportResult } from './skeletonCommon';
-import JSZip from 'jszip';
 
 declare const __INSPECTOR_VERSION__: string;
 
@@ -324,8 +321,16 @@ export class EgretInspector {
     filename: string,
     data: BlobPart
   ): Promise<void> {
-    const safeName = filename.replace(/[/\\]/g, '_');
-    const fh = await (dir as unknown as {
+    // filename 可能含子目录（如 images/bg.png）→ 拆分 + 创建子目录
+    const parts = filename.split(/[\\/]/).filter(Boolean);
+    let cur = dir;
+    for (let i = 0; i < parts.length - 1; i++) {
+      cur = await (cur as unknown as {
+        getDirectoryHandle: (name: string, opts?: { create?: boolean }) => Promise<FileSystemDirectoryHandle>;
+      }).getDirectoryHandle(parts[i], { create: true });
+    }
+    const safeName = parts[parts.length - 1].replace(/[/\\?%*:|"<>]/g, '_');
+    const fh = await (cur as unknown as {
       getFileHandle: (name: string, opts?: { create?: boolean }) => Promise<{
         createWritable: () => Promise<{ write: (d: BlobPart) => Promise<void>; close: () => Promise<void> }>;
       }>;
@@ -335,32 +340,18 @@ export class EgretInspector {
     await w.close();
   }
 
-  private async unzipToDir(
-    zipBase64: string,
-    dir: FileSystemDirectoryHandle
-  ): Promise<string[]> {
-    const zip = await JSZip.loadAsync(zipBase64, { base64: true });
-    const written: string[] = [];
-    const tasks: Promise<void>[] = [];
-    zip.forEach((path, file) => {
-      if (file.dir) return;
-      tasks.push(
-        (async () => {
-          const buf = await file.async('arraybuffer');
-          const parts = path.split('/').filter(Boolean);
-          let cur = dir;
-          for (let i = 0; i < parts.length - 1; i++) {
-            cur = await (cur as unknown as {
-              getDirectoryHandle: (name: string, opts?: { create?: boolean }) => Promise<FileSystemDirectoryHandle>;
-            }).getDirectoryHandle(parts[i], { create: true });
-          }
-          await this.writeFileToDir(cur, parts[parts.length - 1], buf);
-          written.push(path);
-        })()
-      );
-    });
-    await Promise.all(tasks);
-    return written;
+  /** fetch CDN URL → blob → 写入目录；返回字节数 */
+  private async fetchAndWrite(
+    url: string,
+    dir: FileSystemDirectoryHandle,
+    filename: string
+  ): Promise<number> {
+    const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
+    if (!res.ok) throw new Error(`fetch ${url} → HTTP ${res.status}`);
+    const blob = await res.blob();
+    const bytes = blob.size;
+    await this.writeFileToDir(dir, filename, blob);
+    return bytes;
   }
 
   private async onDownload(key: string): Promise<void> {
@@ -378,49 +369,83 @@ export class EgretInspector {
     this.setStatus(`下载中（${key}）… 选定目录: ${dir.name}`);
 
     try {
-      let written: string[] = [];
+      const written: string[] = [];
+      const errors: string[] = [];
+
       if (key === 'scene') {
-        const r: SkeletonExportResult = await exportSceneAssets();
-        if (!r.ok || !r.zipBase64) throw new Error(r.error || '场景打包失败');
-        this.setStatus(`解压场景 zip 到 ${dir.name} …`);
-        written = await this.unzipToDir(r.zipBase64, dir);
+        const items = listSceneSpriteUrls();
+        if (items.length === 0) throw new Error('场景中无 Sprite 资源');
+        this.setStatus(`下载场景 ${items.length} 张图到 ${dir.name} …`);
+        let okN = 0;
+        // 限流并发 8
+        const concurrency = 8;
+        let idx = 0;
+        const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+          while (idx < items.length) {
+            const cur = items[idx++];
+            try {
+              await this.fetchAndWrite(cur.url, dir, `images/${cur.name}`);
+              written.push(cur.name);
+              okN++;
+              if (okN % 5 === 0 || okN === items.length) {
+                this.setStatus(`下载中 ${okN}/${items.length} …`);
+              }
+            } catch (e) {
+              errors.push(`${cur.name}: ${(e as Error).message}`);
+            }
+          }
+        });
+        await Promise.all(workers);
       } else if (key === 'node-texture') {
         const node = this.getSelectedNode();
         if (!node) throw new Error('请先选中节点');
-        const r = extractNodeTextureToPng(node);
-        if (!r.ok) throw new Error(r.error || '纹理提取失败');
+        const tex = getNodeTexture(node);
+        if (!tex) throw new Error('选中节点无 texture');
+        const url = getTextureSourceUrl(tex);
+        if (!url) throw new Error('选中节点的纹理无 CDN URL（可能是 canvas 绘制）');
         const name = getDisplayName(node) || getDisplayId(node);
-        const filename = `${name}_${getDisplayId(node)}.png`;
-        const blob = await (await fetch(`data:image/png;base64,${r.base64}`)).blob();
-        await this.writeFileToDir(dir, filename, blob);
-        written = [filename];
+        const filename = `${name}_${getDisplayId(node)}_${url.split('/').pop()?.split('?')[0] || 'image.png'}`;
+        await this.fetchAndWrite(url, dir, filename);
+        written.push(filename);
       } else if (key === 'node-dragonbones') {
         const node = this.getSelectedNode();
         if (!node) throw new Error('请先选中节点');
         const id = getDisplayId(node);
-        const r = await exportDragonBones(id);
-        if (!r.ok || !r.zipBase64) throw new Error(r.error || '龙骨导出失败');
-        const name = getDisplayName(node) || id;
-        const filename = `${name}.zip`;
-        const blob = await (await fetch(`data:application/zip;base64,${r.zipBase64}`)).blob();
-        await this.writeFileToDir(dir, filename, blob);
-        written = [filename];
+        const r = listDragonBonesUrls(id);
+        if (!r.ok || !r.urls || r.urls.length === 0) {
+          throw new Error(r.error || `龙骨 ${id} 未找到 URL`);
+        }
+        const baseName = r.armatureName || id;
+        this.setStatus(`下载龙骨 ${baseName} ${r.urls.length} 个文件到 ${dir.name} …`);
+        for (const u of r.urls) {
+          try {
+            await this.fetchAndWrite(u.url, dir, `dragonbones/${baseName}/${u.name}`);
+            written.push(u.name);
+          } catch (e) {
+            errors.push(`${u.name}: ${(e as Error).message}`);
+          }
+        }
       } else if (key === 'resources') {
         const list = collectResourceList(2000);
         const json = JSON.stringify(list, null, 2);
         await this.writeFileToDir(dir, 'resources.json', json);
-        written = ['resources.json'];
+        written.push('resources.json');
       } else {
         throw new Error(`未知下载类型: ${key}`);
       }
 
       const summary =
         written.length === 0
-          ? '（无文件）'
-          : written.length <= 3
+          ? errors.length
+            ? '（无文件下载成功）'
+            : '（无文件）'
+          : written.length <= 5
           ? written.join(', ')
-          : `${written.slice(0, 3).join(', ')} 等 ${written.length} 个`;
-      this.setStatus(`下载完成: ${summary} → 目录 ${dir.name}`);
+          : `${written.slice(0, 5).join(', ')} 等 ${written.length} 个`;
+      const errSummary = errors.length
+        ? ` · 失败 ${errors.length}: ${errors.slice(0, 2).join('; ')}`
+        : '';
+      this.setStatus(`下载完成: ${summary} → 目录 ${dir.name}${errSummary}`);
     } catch (e) {
       this.setStatus(`下载失败: ${e instanceof Error ? e.message : String(e)}`);
     } finally {

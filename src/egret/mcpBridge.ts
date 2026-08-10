@@ -37,9 +37,10 @@ import {
 } from './resources';
 import { getEgretCanvas, getEgretVersion } from './runtime';
 import type { EgretDisplayObject } from './runtime';
-import { listDragonBones, exportDragonBones } from './dragonBonesExport';
+import { listDragonBones, exportDragonBones, listDragonBonesUrls } from './dragonBonesExport';
 import { listSpines, exportSpine } from './spineExport';
 import { exportSceneAssets } from './sceneAssetsExport';
+import { listSceneSpriteUrls } from './sceneAssetsExport';
 import type { SkeletonExportResult } from './skeletonCommon';
 
 export type EgretTextureDownloadResult =
@@ -282,6 +283,16 @@ export const egretInspectorMcpApi = {
   /** 批量打包下载当前场景用到的所有图片和龙骨/Spine */
   async downloadSceneAssets(): Promise<SkeletonExportResult> {
     return exportSceneAssets();
+  },
+
+  /** 列出场景所有 Sprite 引用的 CDN URL（不调导出函数，纯 URL） */
+  listSceneSpriteUrls(): { name: string; url: string }[] {
+    return listSceneSpriteUrls();
+  },
+
+  /** 列出指定 DragonBones 节点引用的所有 CDN URL（ske/tex.json/tex.png） */
+  listDragonBonesUrls(id: string) {
+    return listDragonBonesUrls(id);
   },
 };
 

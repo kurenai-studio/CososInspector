@@ -26,6 +26,7 @@ import {
   extractWholeSourceToPng,
   getTextureSourceUrl,
 } from './textureExtract';
+import { collectResourceList } from './resources';
 import {
   pushSkeletonData,
   runtimeSummaryJson,
@@ -133,6 +134,100 @@ export function listDragonBones(): DragonBonesListItem[] {
   }
 
   return out;
+}
+
+export interface DragonBonesUrlItem {
+  name: string;
+  url: string;
+  /** 简单类型标识：ske/tex.json/tex.png/other，便于面板显示 */
+  kind: 'ske' | 'tex-json' | 'tex-png' | 'other';
+}
+
+/**
+ * 列出指定 DragonBones 节点/缓存引用的所有 CDN URL。
+ * 不调任何导出函数（不会触发 canvas 提取、不会爆 WebSocket）：
+ *   - tex.png URL：从 factory._textureAtlasDataMap[key].renderTexture 用 getTextureSourceUrl 拿
+ *   - ske/tex.json URL：在 collectResourceList 里按 armatureName 前缀匹配 alias
+ */
+export function listDragonBonesUrls(id: string): {
+  ok: boolean;
+  urls?: DragonBonesUrlItem[];
+  armatureName?: string;
+  error?: string;
+} {
+  const factory = getFactory();
+  if (!factory) {
+    return { ok: false, error: '未找到 dragonBones.EgretFactory' };
+  }
+
+  // 1) 找到 armatureName（场景节点 → getArmatureName；cache → key）
+  let armatureName = '';
+  let sceneNode: EgretDisplayObject | null = null;
+  if (id.startsWith('egret-db-cache-')) {
+    armatureName = id.slice('egret-db-cache-'.length);
+  } else {
+    const stage = getEgretStage();
+    if (stage) {
+      const node = findDisplayById(stage, id);
+      if (node && isArmatureDisplay(node)) {
+        sceneNode = node;
+        armatureName = getArmatureName(node);
+      }
+    }
+    if (!armatureName) {
+      return { ok: false, error: `未找到 DragonBones 节点 ${id}` };
+    }
+  }
+
+  const urls: DragonBonesUrlItem[] = [];
+  const seen = new Set<string>();
+
+  // 2) tex.png URL：从 _textureAtlasDataMap 找 armatureName 对应的 renderTexture
+  const atlasMap = factory._textureAtlasDataMap ?? factory.textureAtlasDataMap;
+  if (atlasMap && typeof atlasMap === 'object') {
+    const entries = atlasMap[armatureName];
+    const list = Array.isArray(entries) ? entries : entries ? [entries] : [];
+    list.forEach((entry, idx) => {
+      const tex = entry?.renderTexture ?? entry?.texture;
+      if (!tex) return;
+      const u = getTextureSourceUrl(tex as never);
+      if (u && !seen.has(u)) {
+        seen.add(u);
+        const suffix = list.length > 1 ? `_${idx}` : '';
+        urls.push({ name: `${armatureName}${suffix}.png`, url: u, kind: 'tex-png' });
+      }
+    });
+  }
+
+  // 3) ske/tex.json URL：在 collectResourceList 的 alias 里前缀匹配
+  const resList = collectResourceList(2000);
+  if (resList.ok && resList.items) {
+    const needle = armatureName.toLowerCase();
+    for (const it of resList.items) {
+      const alias = (it.name || '').toLowerCase();
+      // alias 形如 eff_bkbyH5_cb_2437_ske_dbbin / eff_bkbyH5_cb_2437_tex_json
+      if (!alias.includes(needle)) continue;
+      if (!seen.has(it.url)) {
+        seen.add(it.url);
+        const kind: DragonBonesUrlItem['kind'] = /_ske[_.]/.test(alias)
+          ? 'ske'
+          : /_tex[_.]json/.test(alias)
+          ? 'tex-json'
+          : /_tex[_.]png/.test(alias)
+          ? 'tex-png'
+          : 'other';
+        // 文件名：alias → 标准 ske/tex 命名
+        let fname = it.name;
+        if (kind === 'ske') fname = `${armatureName}_ske${/\.json$/i.test(it.name) ? '.json' : '.dbbin'}`;
+        else if (kind === 'tex-json') fname = `${armatureName}_tex.json`;
+        else if (kind === 'tex-png') fname = `${armatureName}_tex.png`;
+        urls.push({ name: fname, url: it.url, kind });
+      }
+    }
+  }
+
+  // 4) 去重：tex.png 可能在 step 2 和 step 3 都拿到，已 by url 去重
+  return { ok: true, urls, armatureName };
 }
 
 function exportTexture(
