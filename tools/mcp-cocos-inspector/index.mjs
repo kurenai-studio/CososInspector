@@ -364,7 +364,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
-      name: 'cocos_download_dragon_bones',
+      name: 'egret_download_dragon_bones',
       description:
         '导出 DragonBones 资源为 zip（_ske.json + _tex.json + 纹理 png + runtime_summary）。Egret 引擎专用，nodeId 可为场景节点 id 或 egret-db-cache-{name}',
       inputSchema: {
@@ -992,7 +992,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    if (name === 'cocos_download_spine' || name === 'cocos_download_bmfont' || name === 'cocos_download_dragon_bones') {
+    if (name === 'cocos_download_spine' || name === 'cocos_download_bmfont' || name === 'egret_download_dragon_bones') {
       const target = await resolveBridgeTarget(connOpts(opts ?? {}));
       const delivery = args.delivery ?? 'share';
       const method =

@@ -543,14 +543,16 @@ async function main() {
           { cx: left + w, cy: top + h },
           { cx, cy }, // 中心
         ];
+        // 容差：$getTransformedBounds 在 stage 边界有 1-2px 浮点抖动
+        const tol = 2;
         const stageCorners = corners.map(p => ({
           x: ((p.cx - rect.left) / rect.width) * W,
           y: ((p.cy - rect.top) / rect.height) * H,
         }));
         const inside = stageCorners.map(p => ({
           x: p.x, y: p.y,
-          xin: p.x >= b.x && p.x <= b.x + b.width,
-          yin: p.y >= b.y && p.y <= b.y + b.height,
+          xin: p.x >= b.x - tol && p.x <= b.x + b.width + tol,
+          yin: p.y >= b.y - tol && p.y <= b.y + b.height + tol,
         }));
         const allInside = inside.every(p => p.xin && p.yin);
         return {
