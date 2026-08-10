@@ -471,6 +471,18 @@ export class EgretInspector {
     }
     this.stopPickModeInternal();
     this.refreshAll(true);
+    // 拾取后自动滚动到节点位置（center）
+    requestAnimationFrame(() => this.scrollSelectedIntoView());
+  }
+
+  private scrollSelectedIntoView(): void {
+    if (!this.sceneTreeContainer) return;
+    const sel = this.sceneTreeContainer.querySelector(
+      'li.node-tree-item.selected, li[data-uuid].selected'
+    ) as HTMLElement | null;
+    if (sel) {
+      sel.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
   }
 
   private setCollapsed(collapsed: boolean): void {
