@@ -219,7 +219,9 @@ export class EgretInspector {
       });
       this.downloadMenu.appendChild(b);
     }
-    controls.appendChild(this.downloadMenu);
+    // 挂到 body 而非 controls：避免被 .cocos-inspector-panel 的 backdrop-filter
+    // 建立新 containing block，导致 fixed 重新相对 panel + overflow:hidden 裁切
+    document.body.appendChild(this.downloadMenu);
 
     document.addEventListener('click', (ev) => {
       if (this.isCollapsed) return;
