@@ -30,6 +30,7 @@ import { exportSpine } from './spineExport';
 import { listSceneSpriteUrls, collectSceneAtlasInfo, collectSubtreeAtlasInfo, type AtlasInfo } from './sceneAssetsExport';
 import { collectResourceList } from './resources';
 import type { SkeletonExportFile } from './skeletonCommon';
+import { buildCocosPlist, buildEgretJson } from './atlasReconstruct';
 
 declare const __INSPECTOR_VERSION__: string;
 
@@ -521,8 +522,19 @@ export class EgretInspector {
           errors.push(`sprite ${sp.name}: ${(e as Error).message}`);
         }
       }
+
+      // 输出 atlas 元数据：Cocos .plist + Egret .json，与裁剪好的 sprite PNG 配套
+      try {
+        const baseMetaName = this.safeName(atlas.filename.replace(/\.[^.]+$/, ''));
+        const plistText = buildCocosPlist(atlas);
+        const jsonText = buildEgretJson(atlas);
+        await this.writeFileToDir(dir, `atlas-meta/${baseMetaName}.plist`, new Blob([plistText], { type: 'application/xml' }));
+        await this.writeFileToDir(dir, `atlas-meta/${baseMetaName}.json`, new Blob([jsonText], { type: 'application/json' }));
+      } catch (e) {
+        errors.push(`atlas-meta ${atlas.filename}: ${(e as Error).message}`);
+      }
     }
-    written.push(`sprites/ (${spriteDone} 个)`, 'images/', 'atlas-manifest.json');
+    written.push(`sprites/ (${spriteDone} 个)`, 'images/', 'atlas-meta/', 'atlas-manifest.json');
     if (errors.length) {
       this.setStatus(`图集还原完成: ${spriteDone}/${totalSprites} sprite → 目录 ${dir.name} · 失败 ${errors.length}`);
     } else {

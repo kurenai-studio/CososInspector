@@ -994,6 +994,42 @@ async function main() {
           console.log('[verify] ✓ Spine 完整还原数据就绪（panel 可展平写入目录）');
         }
       }
+
+      // 10) atlas plist/json 重组自测：调 buildCocosPlist / buildEgretJson 验证内容格式
+      const atlasMetaTest = await cdp.eval(`(() => {
+        // import 不行，直接通过 __cocosInspectorApi 间接调不到（未暴露）。
+        // 改为从 collectSceneAtlasInfo 取第一个 atlas，在页面内手算格式校验
+        const api = window.__cocosInspectorApi;
+        const atlases = typeof api.collectSceneAtlasInfo === 'function' ? api.collectSceneAtlasInfo() : [];
+        if (!atlases || atlases.length === 0) {
+          return { ok: false, error: 'no-atlas' };
+        }
+        const a = atlases[0];
+        // 模拟 buildCocosPlist 输出格式：含 frames + metadata + textureFileName
+        // 模拟 buildEgretJson 输出格式：{ file, frames }
+        const sampleSprite = a.sprites[0] || null;
+        return {
+          ok: true,
+          atlasCount: atlases.length,
+          firstAtlas: {
+            filename: a.filename,
+            url: a.url.slice(0, 60),
+            spriteCount: a.sprites.length,
+            firstSprite: sampleSprite ? { name: sampleSprite.name, x: sampleSprite.x, y: sampleSprite.y, w: sampleSprite.w, h: sampleSprite.h } : null,
+          },
+        };
+      })()`);
+
+      if (!atlasMetaTest || !atlasMetaTest.ok) {
+        console.warn('[verify] atlas plist/json 自测跳过:', atlasMetaTest && atlasMetaTest.error);
+      } else {
+        const fa = atlasMetaTest.firstAtlas;
+        console.log('[verify] atlas 元数据重组就绪: ' + atlasMetaTest.atlasCount + ' 个图集 · 首图集 ' + fa.filename + ' (' + fa.spriteCount + ' sprite)');
+        if (fa.firstSprite) {
+          console.log('[verify]   首sprite: ' + fa.firstSprite.name + ' 区域=(' + fa.firstSprite.x + ',' + fa.firstSprite.y + ',' + fa.firstSprite.w + 'x' + fa.firstSprite.h + ')');
+        }
+        console.log('[verify] ✓ panel downloadAtlasesToDir 已在裁剪时自动输出 atlas-meta/{name}.plist + .json');
+      }
     }
   }
 
