@@ -16,6 +16,7 @@
     "cocos-style-flow": "node tools/mcp-cocos-inspector/style-replace-flow.mjs",
     "cocos-prepare-sprite": "node tools/mcp-cocos-inspector/prepare-sprite-replace.mjs",
     "build": "node scripts/build.mjs",
+    "test": "node tests/run.mjs",
     "watch": "node scripts/build.mjs --watch",
     "dev": "node scripts/build.mjs",
     "prod": "node scripts/build.mjs --minify",

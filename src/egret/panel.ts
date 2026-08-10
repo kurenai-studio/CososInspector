@@ -27,6 +27,7 @@ import { startPickMode, stopPickMode, isPickModeActive } from './nodePicker';
 import { getTextureSourceUrl, getNodeTexture } from './textureExtract';
 import { listDragonBonesUrls, exportDragonBones } from './dragonBonesExport';
 import { exportSpine } from './spineExport';
+import { exportMovieClip } from './movieClipExport';
 import { listSceneSpriteUrls, collectSceneAtlasInfo, collectSubtreeAtlasInfo, type AtlasInfo } from './sceneAssetsExport';
 import { collectResourceList } from './resources';
 import type { SkeletonExportFile } from './skeletonCommon';
@@ -202,6 +203,7 @@ export class EgretInspector {
       { key: 'node-dragonbones', label: '选中节点龙骨 zip' },
       { key: 'node-dragonbones-full', label: '选中节点龙骨完整（内存 ske+tex+png）' },
       { key: 'node-spine-full', label: '选中节点 Spine 完整（内存 json+skel+atlas+png）' },
+      { key: 'node-movieclip-full', label: '选中节点 MovieClip（序列帧 PNG + manifest）' },
       { key: 'resources', label: '资源 URL 清单 JSON' },
     ];
     for (const it of dlItems) {
@@ -711,6 +713,22 @@ export class EgretInspector {
         wr.written.forEach((w) => written.push(w));
         wr.errors.forEach((e) => errors.push(e));
         this.setStatus(`Spine ${baseName} 完成: ${wr.written.length}/${r.files.length} 文件 → ${dir.name}`);
+      } else if (key === 'node-movieclip-full') {
+        // MovieClip 序列帧：调 exportMovieClip → files → 展平到 movieclips/{name}/
+        const node = this.getSelectedNode();
+        if (!node) throw new Error('请先选中节点');
+        const id = getDisplayId(node);
+        this.setStatus(`从内存提取 MovieClip ${id}（序列帧 PNG + manifest）…`);
+        const r = await exportMovieClip(id);
+        if (!r.ok) {
+          throw new Error(r.error || r.reason || `MovieClip ${id} 导出失败`);
+        }
+        const baseName = r.zipName.replace(/_movieclip\.zip$/i, '') || id;
+        this.setStatus(`MovieClip ${baseName}: ${r.files.length} 个文件 → 写入 ${dir.name} …`);
+        const wr = await this.writeSkeletonFilesToDir(r.files, dir, baseName, 'movieclips');
+        wr.written.forEach((w) => written.push(w));
+        wr.errors.forEach((e) => errors.push(e));
+        this.setStatus(`MovieClip ${baseName} 完成: ${wr.written.length}/${r.files.length} 文件 → ${dir.name}`);
       } else if (key === 'resources') {
         const list = collectResourceList(2000);
         const json = JSON.stringify(list, null, 2);

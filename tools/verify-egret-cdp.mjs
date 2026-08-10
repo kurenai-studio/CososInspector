@@ -1030,6 +1030,71 @@ async function main() {
         }
         console.log('[verify] ✓ panel downloadAtlasesToDir 已在裁剪时自动输出 atlas-meta/{name}.plist + .json');
       }
+
+      // 11) exportMovieClip 自测：调内存回读序列帧打包，验证 files 含 PNG + manifest.json
+      const mcExportTest = await cdp.eval(`(async () => {
+        const api = window.__cocosInspectorApi;
+        if (typeof api.downloadMovieClip !== 'function') {
+          return { ok: false, error: 'downloadMovieClip 未暴露' };
+        }
+        const list = typeof api.listMovieClips === 'function' ? api.listMovieClips() : [];
+        if (!list || list.length === 0) {
+          return { ok: false, error: 'no-movieclip-node', note: '试玩页当前无 MovieClip 节点' };
+        }
+        const item = list[0];
+        const r = await api.downloadMovieClip(item.id);
+        if (!r.ok) {
+          return { ok: false, error: r.error || r.reason || 'export 失败', log: r.log };
+        }
+        const fileTypes = (r.files || []).map((f) => ({
+          name: f.name,
+          hasText: f.text != null,
+          hasBase64: f.dataBase64 != null,
+          hasUrl: f.url != null,
+          bytes: f.bytes || 0,
+        }));
+        const hasPng = fileTypes.some((f) => /\\.png$/i.test(f.name) && (f.hasBase64 || f.hasUrl));
+        const hasManifest = fileTypes.some((f) => /_manifest\\.json$/i.test(f.name) && f.hasText);
+        const hasSummary = fileTypes.some((f) => /_runtime_summary\\.json$/i.test(f.name) && f.hasText);
+        return {
+          ok: true,
+          mcName: item.name,
+          frameCount: item.frameCount,
+          textureCount: item.textureCount,
+          anims: item.anims,
+          fileCount: fileTypes.length,
+          hasPng,
+          hasManifest,
+          hasSummary,
+          files: fileTypes.slice(0, 10),
+          log: r.log,
+          reason: r.reason,
+        };
+      })()`);
+
+      if (!mcExportTest) {
+        console.warn('[verify] exportMovieClip 自测异常');
+      } else if (mcExportTest.error === 'no-movieclip-node') {
+        console.log('[verify] (跳过) 试玩页当前无 MovieClip 节点；exportMovieClip 代码路径已实现');
+      } else if (!mcExportTest.ok) {
+        console.warn('[verify] ✗ exportMovieClip 失败:', mcExportTest.error);
+      } else {
+        console.log('[verify] MovieClip 导出: ' + mcExportTest.mcName + ' · ' + mcExportTest.frameCount + ' 帧 · ' + mcExportTest.textureCount + ' 纹理 · ' + mcExportTest.fileCount + ' 文件');
+        if (mcExportTest.anims && mcExportTest.anims.length) {
+          console.log('[verify]   动画: ' + mcExportTest.anims.join(', '));
+        }
+        console.log('[verify]   含 PNG: ' + (mcExportTest.hasPng ? '✓' : '✗') + ' · 含 manifest: ' + (mcExportTest.hasManifest ? '✓' : '✗') + ' · 含 summary: ' + (mcExportTest.hasSummary ? '✓' : '✗'));
+        if (mcExportTest.files && mcExportTest.files.length) {
+          for (const f of mcExportTest.files.slice(0, 5)) {
+            const kind = f.hasText ? 'text' : f.hasBase64 ? 'b64' : f.hasUrl ? 'url' : '?';
+            console.log('[verify]   - ' + f.name + ' (' + kind + ', ' + (f.bytes || 0) + 'B)');
+          }
+        }
+        if (mcExportTest.reason) console.log('[verify]   部分缺失: ' + mcExportTest.reason);
+        if (mcExportTest.hasPng && mcExportTest.hasManifest) {
+          console.log('[verify] ✓ MovieClip 序列帧还原数据就绪（panel 可展平写入 movieclips/{name}/）');
+        }
+      }
     }
   }
 

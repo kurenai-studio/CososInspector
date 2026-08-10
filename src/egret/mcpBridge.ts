@@ -41,6 +41,7 @@ import { listDragonBones, exportDragonBones, listDragonBonesUrls } from './drago
 import { listSpines, exportSpine } from './spineExport';
 import { exportSceneAssets } from './sceneAssetsExport';
 import { listSceneSpriteUrls, collectSceneAtlasInfo, collectSubtreeAtlasInfo } from './sceneAssetsExport';
+import { listMovieClips, exportMovieClip } from './movieClipExport';
 import type { SkeletonExportResult } from './skeletonCommon';
 
 export type EgretTextureDownloadResult =
@@ -307,6 +308,16 @@ export const egretInspectorMcpApi = {
   /** 列出指定 DragonBones 节点引用的所有 CDN URL（ske/tex.json/tex.png） */
   listDragonBonesUrls(id: string) {
     return listDragonBonesUrls(id);
+  },
+
+  /** 列出场景所有 MovieClip（序列帧）节点 */
+  listMovieClips() {
+    return listMovieClips();
+  },
+
+  /** 导出指定 MovieClip 节点的所有帧为 zip（base64 inline） */
+  async downloadMovieClip(id: string): Promise<SkeletonExportResult> {
+    return exportMovieClip(id);
   },
 };
 
