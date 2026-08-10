@@ -26,6 +26,7 @@ import { collectSpriteList } from './sprites';
 import { startPickMode, stopPickMode, isPickModeActive } from './nodePicker';
 import { getTextureSourceUrl, getNodeTexture } from './textureExtract';
 import { listDragonBonesUrls, exportDragonBones } from './dragonBonesExport';
+import { exportSpine } from './spineExport';
 import { listSceneSpriteUrls, collectSceneAtlasInfo, collectSubtreeAtlasInfo, type AtlasInfo } from './sceneAssetsExport';
 import { collectResourceList } from './resources';
 import type { SkeletonExportFile } from './skeletonCommon';
@@ -199,6 +200,7 @@ export class EgretInspector {
       { key: 'node-texture', label: '选中节点纹理 PNG' },
       { key: 'node-dragonbones', label: '选中节点龙骨 zip' },
       { key: 'node-dragonbones-full', label: '选中节点龙骨完整（内存 ske+tex+png）' },
+      { key: 'node-spine-full', label: '选中节点 Spine 完整（内存 json+skel+atlas+png）' },
       { key: 'resources', label: '资源 URL 清单 JSON' },
     ];
     for (const it of dlItems) {
@@ -420,7 +422,7 @@ export class EgretInspector {
   }
 
   /**
-   * 把 SkeletonExportFile[] 展平写入目录：baseName/{file.name}
+   * 把 SkeletonExportFile[] 展平写入目录：{subDir}/{baseName}/{file.name}
    * - text → Blob([text])
    * - dataBase64 → base64ToBlob
    * - url → fetchAndWrite（fallback，CDN 失败也跳过）
@@ -428,12 +430,13 @@ export class EgretInspector {
   private async writeSkeletonFilesToDir(
     files: SkeletonExportFile[],
     dir: FileSystemDirectoryHandle,
-    baseName: string
+    baseName: string,
+    subDir: string = 'dragonbones'
   ): Promise<{ written: string[]; errors: string[] }> {
     const written: string[] = [];
     const errors: string[] = [];
     for (const f of files) {
-      const relPath = `dragonbones/${this.safeName(baseName)}/${f.name}`;
+      const relPath = `${subDir}/${this.safeName(baseName)}/${f.name}`;
       try {
         if (f.text != null) {
           await this.writeFileToDir(dir, relPath, new Blob([f.text], { type: f.mime }));
@@ -672,6 +675,22 @@ export class EgretInspector {
         wr.written.forEach((w) => written.push(w));
         wr.errors.forEach((e) => errors.push(e));
         this.setStatus(`龙骨 ${baseName} 完成: ${wr.written.length}/${r.files.length} 文件 → ${dir.name}`);
+      } else if (key === 'node-spine-full') {
+        // 内存回读完整 Spine：调 exportSpine → files → 展平到 spines/{name}/
+        const node = this.getSelectedNode();
+        if (!node) throw new Error('请先选中节点');
+        const id = getDisplayId(node);
+        this.setStatus(`从内存提取 Spine ${id}（json+skel+atlas+png）…`);
+        const r = await exportSpine(id);
+        if (!r.ok) {
+          throw new Error(r.error || r.reason || `Spine ${id} 导出失败`);
+        }
+        const baseName = r.zipName.replace(/_spine\.zip$/i, '') || id;
+        this.setStatus(`Spine ${baseName}: ${r.files.length} 个文件 → 写入 ${dir.name} …`);
+        const wr = await this.writeSkeletonFilesToDir(r.files, dir, baseName, 'spines');
+        wr.written.forEach((w) => written.push(w));
+        wr.errors.forEach((e) => errors.push(e));
+        this.setStatus(`Spine ${baseName} 完成: ${wr.written.length}/${r.files.length} 文件 → ${dir.name}`);
       } else if (key === 'resources') {
         const list = collectResourceList(2000);
         const json = JSON.stringify(list, null, 2);

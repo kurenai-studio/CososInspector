@@ -935,6 +935,65 @@ async function main() {
           console.warn('[verify] ✗ 龙骨导出文件不全');
         }
       }
+
+      // 9) exportSpine 自测：调内存回读 Spine 打包
+      const spineExportTest = await cdp.eval(`(async () => {
+        const api = window.__cocosInspectorApi;
+        if (typeof api.downloadSpine !== 'function') {
+          return { ok: false, error: 'downloadSpine 未暴露' };
+        }
+        const list = typeof api.listSpines === 'function' ? api.listSpines() : [];
+        if (!list || list.length === 0) {
+          return { ok: false, error: 'no-spine-node', note: '试玩页当前无 Spine 节点（不影响 v3.3.21 代码路径）' };
+        }
+        const item = list[0];
+        const r = await api.downloadSpine(item.id);
+        if (!r.ok) {
+          return { ok: false, error: r.error || r.reason || 'export 失败', log: r.log };
+        }
+        const fileTypes = (r.files || []).map((f) => ({
+          name: f.name,
+          hasText: f.text != null,
+          hasBase64: f.dataBase64 != null,
+          hasUrl: f.url != null,
+          bytes: f.bytes || 0,
+        }));
+        const hasJsonOrSkel = fileTypes.some((f) => /\\.json$/i.test(f.name) || /\\.skel$/i.test(f.name));
+        const hasAtlas = fileTypes.some((f) => /\\.atlas$/i.test(f.name));
+        const hasPng = fileTypes.some((f) => /\\.png$/i.test(f.name) && (f.hasBase64 || f.hasUrl));
+        return {
+          ok: true,
+          spineName: item.name,
+          fileCount: fileTypes.length,
+          hasJsonOrSkel,
+          hasAtlas,
+          hasPng,
+          files: fileTypes.slice(0, 10),
+          log: r.log,
+          reason: r.reason,
+        };
+      })()`);
+
+      if (!spineExportTest) {
+        console.warn('[verify] exportSpine 自测异常');
+      } else if (spineExportTest.error === 'no-spine-node') {
+        console.log('[verify] (跳过) 试玩页当前无 Spine 节点；exportSpine 代码路径已实现');
+      } else if (!spineExportTest.ok) {
+        console.warn('[verify] ✗ exportSpine 失败:', spineExportTest.error);
+      } else {
+        console.log('[verify] Spine 导出: ' + spineExportTest.spineName + ' · ' + spineExportTest.fileCount + ' 文件');
+        console.log('[verify]   含 json/skel: ' + (spineExportTest.hasJsonOrSkel ? '✓' : '✗') + ' · 含 atlas: ' + (spineExportTest.hasAtlas ? '✓' : '✗') + ' · 含 png: ' + (spineExportTest.hasPng ? '✓' : '✗'));
+        if (spineExportTest.files && spineExportTest.files.length) {
+          for (const f of spineExportTest.files.slice(0, 5)) {
+            const kind = f.hasText ? 'text' : f.hasBase64 ? 'b64' : f.hasUrl ? 'url' : '?';
+            console.log('[verify]   - ' + f.name + ' (' + kind + ', ' + (f.bytes || 0) + 'B)');
+          }
+        }
+        if (spineExportTest.reason) console.log('[verify]   部分缺失: ' + spineExportTest.reason);
+        if (spineExportTest.hasJsonOrSkel && spineExportTest.hasPng) {
+          console.log('[verify] ✓ Spine 完整还原数据就绪（panel 可展平写入目录）');
+        }
+      }
     }
   }
 
