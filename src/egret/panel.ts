@@ -26,7 +26,7 @@ import { collectSpriteList } from './sprites';
 import { startPickMode, stopPickMode, isPickModeActive } from './nodePicker';
 import { getTextureSourceUrl, getNodeTexture } from './textureExtract';
 import { listDragonBonesUrls } from './dragonBonesExport';
-import { listSceneSpriteUrls } from './sceneAssetsExport';
+import { listSceneSpriteUrls, collectSceneAtlasInfo, type AtlasInfo } from './sceneAssetsExport';
 import { collectResourceList } from './resources';
 
 declare const __INSPECTOR_VERSION__: string;
@@ -192,7 +192,8 @@ export class EgretInspector {
     this.downloadMenu.className = 'download-menu';
     this.downloadMenu.style.display = 'none';
     const dlItems: Array<{ key: string; label: string }> = [
-      { key: 'scene', label: '整场景打包 zip' },
+      { key: 'scene', label: '整场景下载原图' },
+      { key: 'scene-atlas', label: '整场景图集还原（按 sprite 裁剪）' },
       { key: 'node-texture', label: '选中节点纹理 PNG' },
       { key: 'node-dragonbones', label: '选中节点龙骨 zip' },
       { key: 'resources', label: '资源 URL 清单 JSON' },
@@ -354,6 +355,59 @@ export class EgretInspector {
     return bytes;
   }
 
+  /** 加载 HTMLImageElement（src 可以是 http/cdn 或 blob:URL） */
+  private loadImage(src: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error(`图片加载失败: ${src.slice(0, 80)}`));
+      img.src = src;
+    });
+  }
+
+  /** canvas drawImage 裁剪 sprite 区域 → PNG Blob */
+  private cropSprite(
+    img: HTMLImageElement,
+    x: number,
+    y: number,
+    w: number,
+    h: number
+  ): Promise<Blob> {
+    return new Promise((resolve, reject) => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(w));
+        canvas.height = Math.max(1, Math.round(h));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('canvas 2D 上下文不可用'));
+          return;
+        }
+        ctx.drawImage(
+          img,
+          x, y, w, h,
+          0, 0, canvas.width, canvas.height
+        );
+        canvas.toBlob(
+          (b) => {
+            if (b) resolve(b);
+            else reject(new Error('toBlob 返回 null'));
+          },
+          'image/png'
+        );
+      } catch (e) {
+        reject(e instanceof Error ? e : new Error(String(e)));
+      }
+    });
+  }
+
+  /** Windows 文件名非法字符替换为 _ */
+  private safeName(name: string): string {
+    const cleaned = (name || 'sprite').trim().replace(/[\\/:*?"<>|]/g, '_');
+    return cleaned.length > 100 ? cleaned.slice(0, 100) : cleaned;
+  }
+
   private async onDownload(key: string): Promise<void> {
     this.hideDownloadMenu();
     if (this.isDownloading) {
@@ -396,6 +450,68 @@ export class EgretInspector {
           }
         });
         await Promise.all(workers);
+      } else if (key === 'scene-atlas') {
+        // 图集还原：收 collectSceneAtlasInfo → 下载原图 → canvas 按 sprite 区域裁剪 → 写 sprites/
+        const atlases: AtlasInfo[] = collectSceneAtlasInfo();
+        if (atlases.length === 0) throw new Error('场景中无图集 sprite');
+        const totalSprites = atlases.reduce((s, a) => s + a.sprites.length, 0);
+        this.setStatus(`发现 ${atlases.length} 个图集 · ${totalSprites} 个 sprite，开始还原到 ${dir.name} …`);
+
+        // 写 manifest 备份（含图集 URL + sprite 区域，便于离线重做）
+        const manifest = atlases.map((a) => ({
+          url: a.url,
+          filename: a.filename,
+          sprites: a.sprites.map((s) => ({ name: s.name, x: s.x, y: s.y, w: s.w, h: s.h, nodeId: s.nodeId })),
+        }));
+        await this.writeFileToDir(dir, 'atlas-manifest.json', JSON.stringify(manifest, null, 2));
+
+        // 逐图集处理（顺序，避免一次性 fetch 太多大图）
+        let spriteDone = 0;
+        const errors2: string[] = [];
+        for (const atlas of atlases) {
+          // fetch 原图 → Image
+          let img: HTMLImageElement;
+          try {
+            const res = await fetch(atlas.url, { mode: 'cors', credentials: 'omit' });
+            if (!res.ok) { errors2.push(`${atlas.filename}: HTTP ${res.status}`); continue; }
+            const blob = await res.blob();
+            const urlObj = URL.createObjectURL(blob);
+            img = await this.loadImage(urlObj);
+            URL.revokeObjectURL(urlObj);
+          } catch (e) {
+            errors2.push(`${atlas.filename}: ${(e as Error).message}`);
+            continue;
+          }
+          // 写原图备份
+          try {
+            const res2 = await fetch(atlas.url, { mode: 'cors', credentials: 'omit' });
+            if (res2.ok) {
+              const blob2 = await res2.blob();
+              await this.writeFileToDir(dir, `images/${atlas.filename}`, blob2);
+            }
+          } catch { /* ignore */ }
+
+          // 裁剪每个 sprite
+          for (const sp of atlas.sprites) {
+            try {
+              const png = await this.cropSprite(img, sp.x, sp.y, sp.w, sp.h);
+              await this.writeFileToDir(dir, `sprites/${this.safeName(sp.name)}.png`, png);
+              spriteDone++;
+              if (spriteDone % 10 === 0 || spriteDone === totalSprites) {
+                this.setStatus(`图集还原 ${spriteDone}/${totalSprites} …`);
+              }
+            } catch (e) {
+              errors2.push(`sprite ${sp.name}: ${(e as Error).message}`);
+            }
+          }
+        }
+        written.push(`sprites/ (${spriteDone} 个)`, 'images/', 'atlas-manifest.json');
+        if (errors2.length) {
+          this.setStatus(`图集还原完成: ${spriteDone}/${totalSprites} sprite → 目录 ${dir.name} · 失败 ${errors2.length}`);
+        } else {
+          this.setStatus(`图集还原完成: ${spriteDone}/${totalSprites} sprite → 目录 ${dir.name}`);
+        }
+        return;
       } else if (key === 'node-texture') {
         const node = this.getSelectedNode();
         if (!node) throw new Error('请先选中节点');

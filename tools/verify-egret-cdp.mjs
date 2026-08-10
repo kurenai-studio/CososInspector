@@ -787,6 +787,60 @@ async function main() {
       // 不算测试失败，因为 CORS 是浏览器限制
     }
     console.log('[verify] ✓ URL 提取自测完成');
+
+    // 6) collectSceneAtlasInfo 自测：图集数 + sprite 总数 + 第一个图集原图 fetch 可达
+    const atlasTest = await cdp.eval(`(() => {
+      const api = window.__cocosInspectorApi;
+      if (typeof api.collectSceneAtlasInfo !== 'function') {
+        return { ok: false, error: 'collectSceneAtlasInfo 未暴露' };
+      }
+      const atlases = api.collectSceneAtlasInfo();
+      const totalSprites = atlases.reduce((s, a) => s + (a.sprites ? a.sprites.length : 0), 0);
+      const first = atlases[0] || null;
+      return {
+        ok: true,
+        atlasCount: atlases.length,
+        totalSprites,
+        firstAtlas: first ? {
+          url: first.url,
+          filename: first.filename,
+          spriteCount: first.sprites.length,
+          firstSprite: first.sprites[0] || null,
+        } : null,
+      };
+    })()`);
+
+    if (!atlasTest || !atlasTest.ok) {
+      console.warn('[verify] collectSceneAtlasInfo 失败:', atlasTest && atlasTest.error);
+    } else {
+      console.log('[verify] 图集数: ' + atlasTest.atlasCount + ' · sprite 总数: ' + atlasTest.totalSprites);
+      if (atlasTest.firstAtlas) {
+        const fa = atlasTest.firstAtlas;
+        console.log('[verify]   首图集: ' + fa.filename + ' (' + fa.spriteCount + ' sprite) → ' + fa.url.slice(0, 80));
+        if (fa.firstSprite) {
+          console.log('[verify]   首sprite: name=' + fa.firstSprite.name + ' 区域=(' + fa.firstSprite.x + ',' + fa.firstSprite.y + ',' + fa.firstSprite.w + 'x' + fa.firstSprite.h + ')');
+        }
+        // fetch 首图集原图可达性
+        if (fa.url) {
+          const atlasFetch = await cdp.eval(`(async () => {
+            try {
+              const r = await fetch(${JSON.stringify(fa.url)}, { mode: 'cors', credentials: 'omit' });
+              return { status: r.status, ok: r.ok };
+            } catch (e) {
+              return { error: String(e && e.message || e) };
+            }
+          })()`);
+          const mark = atlasFetch && atlasFetch.ok ? '✓' : '✗';
+          console.log('[verify]   ' + mark + ' 图集原图 fetch → HTTP ' + (atlasFetch && (atlasFetch.status || atlasFetch.error)));
+        }
+      }
+      if (atlasTest.atlasCount === 0) {
+        console.warn('[verify] ✗ 场景无图集 sprite（collectSceneAtlasInfo 返回 0）');
+        process.exitCode = 1;
+      } else {
+        console.log('[verify] ✓ 图集还原自测数据就绪（panel 可下载裁剪）');
+      }
+    }
   }
 
   cdp.close();

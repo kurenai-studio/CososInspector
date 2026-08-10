@@ -48,6 +48,71 @@ export function listSceneSpriteUrls(): { name: string; url: string }[] {
     }));
 }
 
+/** 图集中单个 sprite 区域 */
+export interface AtlasSpriteRect {
+  name: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** 是否旋转（Egret 部分图集支持旋转 90°，未启用检测） */
+  rotated?: boolean;
+  /** 该 sprite 所属节点 ID（便于追溯） */
+  nodeId: string;
+}
+
+/** 一个图集的所有 sprite 区域 */
+export interface AtlasInfo {
+  /** 图集原图 CDN URL */
+  url: string;
+  /** 图集文件名（去 query） */
+  filename: string;
+  /** 该图集下所有 sprite 区域 */
+  sprites: AtlasSpriteRect[];
+}
+
+/**
+ * 收集场景所有图集 + 每个图集下的 sprite 区域。
+ * 数据直接从 Egret 引擎内存拿（texture.$bitmapX/Y/W/H + $bitmapData.$source.src），
+ * 不依赖 atlas json 文件。
+ *
+ * 一个图集原图 URL 对应多个 sprite（Bitmap 节点）。同一图集下的 sprite 被分组到一起。
+ */
+export function collectSceneAtlasInfo(): AtlasInfo[] {
+  const stage = getEgretStage();
+  if (!stage) return [];
+  const byUrl = new Map<string, AtlasInfo>();
+  const seen = new Set<string>(); // 按 url+sprite 区域去重
+  walkDisplayTree(stage, (node) => {
+    const tex = getNodeTexture(node);
+    if (!tex) return;
+    const url = getTextureSourceUrl(tex);
+    if (!url) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anyTex = tex as any;
+    const x = Number(anyTex.$bitmapX ?? 0);
+    const y = Number(anyTex.$bitmapY ?? 0);
+    const w = Number(anyTex.$bitmapWidth ?? anyTex.textureWidth ?? 0);
+    const h = Number(anyTex.$bitmapHeight ?? anyTex.textureHeight ?? 0);
+    if (w <= 0 || h <= 0) return;
+    const key = `${url}|${x},${y},${w}x${h}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    let info = byUrl.get(url);
+    if (!info) {
+      info = { url, filename: urlToFilename(url, 'atlas.png'), sprites: [] };
+      byUrl.set(url, info);
+    }
+    const name = getDisplayName(node) || String(node.name || `sprite_${info.sprites.length}`);
+    info.sprites.push({
+      name,
+      x, y, w, h,
+      nodeId: getDisplayId(node),
+    });
+  });
+  return Array.from(byUrl.values());
+}
+
 /** 把 URL 转成相对路径文件名（去 query/hash） */
 function urlToFilename(url: string, fallback: string): string {
   try {
