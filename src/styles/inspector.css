@@ -183,6 +183,7 @@
   display: flex;
   gap: 6px;
   align-items: center;
+  position: relative;
 }
 
 .refresh-btn {
@@ -222,6 +223,58 @@
 
 .pause-btn--active:hover {
   background: rgba(180, 70, 70, 0.95);
+}
+
+.download-btn {
+  padding: 4px 10px;
+  background: rgba(40, 100, 70, 0.9);
+  border: 1px solid rgba(60, 140, 100, 0.7);
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.download-btn:hover {
+  background: rgba(48, 115, 80, 0.95);
+}
+
+.download-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.download-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: rgba(30, 30, 30, 0.97);
+  border: 1px solid rgba(102, 102, 102, 0.6);
+  border-radius: 4px;
+  padding: 4px;
+  z-index: 1000;
+  min-width: 200px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.download-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  color: #ddd;
+  cursor: pointer;
+  font-size: 12px;
+  border-radius: 2px;
+}
+
+.download-menu-item:hover {
+  background: rgba(60, 140, 100, 0.6);
+  color: #fff;
 }
 
 .perf-scan-mode {

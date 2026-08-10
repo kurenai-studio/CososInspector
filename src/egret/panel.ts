@@ -25,6 +25,12 @@ import {
 import { collectSpriteList } from './sprites';
 import { getNodeTexture } from './textureExtract';
 import { startPickMode, stopPickMode, isPickModeActive } from './nodePicker';
+import { extractNodeTextureToPng } from './textureExtract';
+import { exportDragonBones } from './dragonBonesExport';
+import { collectResourceList } from './resources';
+import { exportSceneAssets } from './sceneAssetsExport';
+import type { SkeletonExportResult } from './skeletonCommon';
+import JSZip from 'jszip';
 
 declare const __INSPECTOR_VERSION__: string;
 
@@ -49,6 +55,9 @@ export class EgretInspector {
   private updateTimer: number | null = null;
   private isPickMode = false;
   private pickBtn: HTMLButtonElement | null = null;
+  private downloadBtn: HTMLButtonElement | null = null;
+  private downloadMenu: HTMLElement | null = null;
+  private isDownloading = false;
 
   constructor() {
     this.init();
@@ -174,6 +183,46 @@ export class EgretInspector {
     this.pickBtn.addEventListener('click', () => this.togglePickMode());
     controls.appendChild(this.pickBtn);
 
+    this.downloadBtn = document.createElement('button');
+    this.downloadBtn.type = 'button';
+    this.downloadBtn.className = 'download-btn';
+    this.downloadBtn.textContent = '下载';
+    this.downloadBtn.title = '导出资源到本地目录';
+    this.downloadBtn.addEventListener('click', () => this.toggleDownloadMenu());
+    controls.appendChild(this.downloadBtn);
+
+    this.downloadMenu = document.createElement('div');
+    this.downloadMenu.className = 'download-menu';
+    this.downloadMenu.style.display = 'none';
+    const dlItems: Array<{ key: string; label: string }> = [
+      { key: 'scene', label: '整场景打包 zip' },
+      { key: 'node-texture', label: '选中节点纹理 PNG' },
+      { key: 'node-dragonbones', label: '选中节点龙骨 zip' },
+      { key: 'resources', label: '资源 URL 清单 JSON' },
+    ];
+    for (const it of dlItems) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'download-menu-item';
+      b.textContent = it.label;
+      b.dataset.key = it.key;
+      b.addEventListener('click', () => {
+        this.onDownload(it.key).catch((e) => {
+          this.setStatus(`下载失败: ${e instanceof Error ? e.message : String(e)}`);
+        });
+      });
+      this.downloadMenu.appendChild(b);
+    }
+    controls.appendChild(this.downloadMenu);
+
+    document.addEventListener('click', (ev) => {
+      if (this.isCollapsed) return;
+      const target = ev.target as Node;
+      if (this.downloadMenu?.contains(target)) return;
+      if (this.downloadBtn === target) return;
+      this.hideDownloadMenu();
+    });
+
     header.appendChild(controls);
     this.panel.appendChild(header);
 
@@ -244,6 +293,146 @@ export class EgretInspector {
     this.pickBtn?.classList.remove('pick-btn--active');
     if (this.pickBtn) this.pickBtn.textContent = '拾取';
     stopPickMode();
+  }
+
+  private toggleDownloadMenu(): void {
+    if (!this.downloadMenu) return;
+    const open = this.downloadMenu.style.display !== 'none';
+    this.downloadMenu.style.display = open ? 'none' : 'flex';
+  }
+
+  private hideDownloadMenu(): void {
+    if (this.downloadMenu) this.downloadMenu.style.display = 'none';
+  }
+
+  private async pickDirectory(): Promise<FileSystemDirectoryHandle | null> {
+    const fn = (window as unknown as {
+      showDirectoryPicker?: (opts?: { mode?: string }) => Promise<FileSystemDirectoryHandle>;
+    }).showDirectoryPicker;
+    if (typeof fn !== 'function') {
+      throw new Error('当前浏览器不支持目录选择（需 Chrome/Edge 117+）');
+    }
+    try {
+      return await fn.call(window, { mode: 'readwrite' });
+    } catch {
+      return null; // 用户取消
+    }
+  }
+
+  private async writeFileToDir(
+    dir: FileSystemDirectoryHandle,
+    filename: string,
+    data: BlobPart
+  ): Promise<void> {
+    const safeName = filename.replace(/[/\\]/g, '_');
+    const fh = await (dir as unknown as {
+      getFileHandle: (name: string, opts?: { create?: boolean }) => Promise<{
+        createWritable: () => Promise<{ write: (d: BlobPart) => Promise<void>; close: () => Promise<void> }>;
+      }>;
+    }).getFileHandle(safeName, { create: true });
+    const w = await fh.createWritable();
+    await w.write(data);
+    await w.close();
+  }
+
+  private async unzipToDir(
+    zipBase64: string,
+    dir: FileSystemDirectoryHandle
+  ): Promise<string[]> {
+    const zip = await JSZip.loadAsync(zipBase64, { base64: true });
+    const written: string[] = [];
+    const tasks: Promise<void>[] = [];
+    zip.forEach((path, file) => {
+      if (file.dir) return;
+      tasks.push(
+        (async () => {
+          const buf = await file.async('arraybuffer');
+          const parts = path.split('/').filter(Boolean);
+          let cur = dir;
+          for (let i = 0; i < parts.length - 1; i++) {
+            cur = await (cur as unknown as {
+              getDirectoryHandle: (name: string, opts?: { create?: boolean }) => Promise<FileSystemDirectoryHandle>;
+            }).getDirectoryHandle(parts[i], { create: true });
+          }
+          await this.writeFileToDir(cur, parts[parts.length - 1], buf);
+          written.push(path);
+        })()
+      );
+    });
+    await Promise.all(tasks);
+    return written;
+  }
+
+  private async onDownload(key: string): Promise<void> {
+    this.hideDownloadMenu();
+    if (this.isDownloading) {
+      this.setStatus('正在下载，请等待…');
+      return;
+    }
+
+    const dir = await this.pickDirectory();
+    if (!dir) return; // 用户取消
+
+    this.isDownloading = true;
+    this.downloadBtn && (this.downloadBtn.disabled = true);
+    this.setStatus(`下载中（${key}）… 选定目录: ${dir.name}`);
+
+    try {
+      let written: string[] = [];
+      if (key === 'scene') {
+        const r: SkeletonExportResult = await exportSceneAssets();
+        if (!r.ok || !r.zipBase64) throw new Error(r.error || '场景打包失败');
+        this.setStatus(`解压场景 zip 到 ${dir.name} …`);
+        written = await this.unzipToDir(r.zipBase64, dir);
+      } else if (key === 'node-texture') {
+        const node = this.getSelectedNode();
+        if (!node) throw new Error('请先选中节点');
+        const r = extractNodeTextureToPng(node);
+        if (!r.ok) throw new Error(r.error || '纹理提取失败');
+        const name = getDisplayName(node) || getDisplayId(node);
+        const filename = `${name}_${getDisplayId(node)}.png`;
+        const blob = await (await fetch(`data:image/png;base64,${r.base64}`)).blob();
+        await this.writeFileToDir(dir, filename, blob);
+        written = [filename];
+      } else if (key === 'node-dragonbones') {
+        const node = this.getSelectedNode();
+        if (!node) throw new Error('请先选中节点');
+        const id = getDisplayId(node);
+        const r = await exportDragonBones(id);
+        if (!r.ok || !r.zipBase64) throw new Error(r.error || '龙骨导出失败');
+        const name = getDisplayName(node) || id;
+        const filename = `${name}.zip`;
+        const blob = await (await fetch(`data:application/zip;base64,${r.zipBase64}`)).blob();
+        await this.writeFileToDir(dir, filename, blob);
+        written = [filename];
+      } else if (key === 'resources') {
+        const list = collectResourceList(2000);
+        const json = JSON.stringify(list, null, 2);
+        await this.writeFileToDir(dir, 'resources.json', json);
+        written = ['resources.json'];
+      } else {
+        throw new Error(`未知下载类型: ${key}`);
+      }
+
+      const summary =
+        written.length === 0
+          ? '（无文件）'
+          : written.length <= 3
+          ? written.join(', ')
+          : `${written.slice(0, 3).join(', ')} 等 ${written.length} 个`;
+      this.setStatus(`下载完成: ${summary} → 目录 ${dir.name}`);
+    } catch (e) {
+      this.setStatus(`下载失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      this.isDownloading = false;
+      this.downloadBtn && (this.downloadBtn.disabled = false);
+    }
+  }
+
+  private getSelectedNode(): EgretDisplayObject | null {
+    const root = getSceneRoot();
+    if (!root || !this.selectedId) return null;
+    return findDisplayById(root, this.selectedId);
   }
 
   private onNodePicked(nodeId: string): void {
