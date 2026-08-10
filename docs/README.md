@@ -1,7 +1,8 @@
 # Cocos Inspector 3 文档索引
 
 当前主能力：**试玩页场景读取（S）+ Creator 场景复刻（P）+ MCP 自动化**。  
-**v3.3.x**：运行时 Dump / Bundle 下载；另见 **Bundle 逻辑还原**（可读优先、理解层标准）——
+**v4.0.0**：Dump → Creator 工程后处理闭环（SpriteAtlas / Spine / 脚本 CID /
+场景节点 UUID / 压缩 UUID 展开等）；另见 **Bundle 逻辑还原**——
 [bundle-logic-recovery.md](features/bundle-logic-recovery.md)。
 
 ## Agent Skills（本仓库）

@@ -1,3 +1,27 @@
+
+## Creator: Material normalize
+
+`ash
+node tools/mcp-cocos-inspector/fix-materials.mjs <project>/assets
+`
+
+See [runtime-dump-reverse.md](./runtime-dump-reverse.md).
+
+## Creator: compiled Effect -> YAML
+
+`ash
+node tools/mcp-cocos-inspector/fix-compiled-effects.mjs <project>/assets
+`
+
+See [runtime-dump-reverse.md](./runtime-dump-reverse.md).
+
+## Creator: script CID -> TS stub
+
+`ash
+node tools/mcp-cocos-inspector/fix-script-cid-map.mjs <project>/scripts --restored-root <dump>/scripts-split
+`
+
+See [runtime-dump-reverse.md](./runtime-dump-reverse.md).
 # Bundle ??????????
 
 > ???? Inspector ? Cocos 3.x ?????**?????**????????? / ????????????  

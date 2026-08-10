@@ -129,6 +129,47 @@ Spine 显示为 JsonAsset / 缺 atlas 时，跑：
 node fix-spine-from-import.mjs <工程>/assets --bundle-root <dump>/build/assets/resources
 ```
 
+`.mtl` 粉线 / `invalid: true`（数组壳、压缩 UUID、字符串 `_techIdx`）时，跑：
+
+```powershell
+node fix-materials.mjs <工程>/assets
+```
+
+`.effect` 红叹号（编译态 EffectAsset JSON）时，跑：
+
+```powershell
+node fix-compiled-effects.mjs <工程>/assets
+```
+
+Prefab `Script … missing or invalid`（CID ≠ 脚本 UUID）时，跑：
+
+```powershell
+node fix-script-cid-map.mjs <工程>/assets/scripts --restored-root <dump>/scripts-split
+node materialize-project-scripts.mjs <export-full工程根>
+```
+
+（若 `_scripts` 仍是指向 `scripts-split` 的 symlink，必须先 materialize，否则无 `_RF.push`、节点空白。）
+
+层级面板空白 / `过滤了重复的 UUID` / `Maximum call stack` 时，先关闭场景再跑：
+
+```powershell
+node fix-scene-node-ids.mjs <工程>/assets
+```
+
+（节点 `_id` 与场景 meta UUID 冲突；`.fire` 建议改名为 `.scene`。若所有场景都 `download failed`，重启 Creator。）
+
+Sprite 全空 / 图集是 JsonAsset 时，跑：
+
+```powershell
+node fix-sprite-atlas-from-import.mjs <工程>/assets `
+  --bundle-root <dump>/build/assets/slotgame `
+  --restore-scene <run1>/assets/slotgame/game_scene.fire `
+  --restore-prefabs-from <run1>/assets
+node expand-compressed-uuids.mjs <工程>/assets
+```
+
+（从 import packs 还原 TexturePacker `.plist` 并保留原 UUID；压缩 UUID 需展开后 Creator 才能解析。）
+
 风格替换流程：截屏 → 列 Sprite → 下载 → GenerateImage → `cocos_replace_texture` → 导出 → 重打包。
 
 **场景复刻**（试玩 → Creator）：读 `.cursor/skills/inspector-scene-recovery/SKILL.md`，详参 `docs/features/scene-recovery.md`。
