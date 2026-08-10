@@ -873,6 +873,68 @@ async function main() {
           console.log('[verify] (信息) 子树(stage根) ' + subtreeTest.atlasCount + '/' + subtreeTest.totalSprites + ' vs 场景 ' + atlasTest.atlasCount + '/' + atlasTest.totalSprites + '（不一定相等，看根节点是否含全部）');
         }
       }
+
+      // 8) exportDragonBones 自测：调内存回读龙骨打包，验证 files 含 ske.json/tex.json/png
+      const dbExportTest = await cdp.eval(`(async () => {
+        const api = window.__cocosInspectorApi;
+        if (typeof api.downloadDragonBones !== 'function') {
+          return { ok: false, error: 'downloadDragonBones 未暴露' };
+        }
+        // 先列龙骨节点
+        const list = typeof api.listDragonBones === 'function' ? api.listDragonBones() : [];
+        if (!list || list.length === 0) {
+          return { ok: false, error: 'no-dragonbones-node', note: '试玩页当前无龙骨节点（不影响 v3.3.20 代码路径）' };
+        }
+        const item = list[0];
+        const r = await api.downloadDragonBones(item.id);
+        if (!r.ok) {
+          return { ok: false, error: r.error || r.reason || 'export 失败', log: r.log };
+        }
+        const fileTypes = (r.files || []).map((f) => ({
+          name: f.name,
+          hasText: f.text != null,
+          hasBase64: f.dataBase64 != null,
+          hasUrl: f.url != null,
+          bytes: f.bytes || 0,
+        }));
+        const hasSke = fileTypes.some((f) => /_ske\\.json$/i.test(f.name) || /_ske\\.skel$/i.test(f.name));
+        const hasTexJson = fileTypes.some((f) => /_tex\\.json$/i.test(f.name));
+        const hasPng = fileTypes.some((f) => /\\.png$/i.test(f.name) && (f.hasBase64 || f.hasUrl));
+        return {
+          ok: true,
+          armatureName: item.name,
+          fileCount: fileTypes.length,
+          hasSke,
+          hasTexJson,
+          hasPng,
+          files: fileTypes.slice(0, 10),
+          log: r.log,
+          reason: r.reason,
+        };
+      })()`);
+
+      if (!dbExportTest) {
+        console.warn('[verify] exportDragonBones 自测异常');
+      } else if (dbExportTest.error === 'no-dragonbones-node') {
+        console.log('[verify] (跳过) 试玩页当前无龙骨节点；exportDragonBones 代码路径已实现，等出现龙骨时再验证');
+      } else if (!dbExportTest.ok) {
+        console.warn('[verify] ✗ exportDragonBones 失败:', dbExportTest.error);
+      } else {
+        console.log('[verify] 龙骨导出: ' + dbExportTest.armatureName + ' · ' + dbExportTest.fileCount + ' 文件');
+        console.log('[verify]   含 ske: ' + (dbExportTest.hasSke ? '✓' : '✗') + ' · 含 tex.json: ' + (dbExportTest.hasTexJson ? '✓' : '✗') + ' · 含 png: ' + (dbExportTest.hasPng ? '✓' : '✗'));
+        if (dbExportTest.files && dbExportTest.files.length) {
+          for (const f of dbExportTest.files.slice(0, 5)) {
+            const kind = f.hasText ? 'text' : f.hasBase64 ? 'b64' : f.hasUrl ? 'url' : '?';
+            console.log('[verify]   - ' + f.name + ' (' + kind + ', ' + (f.bytes || 0) + 'B)');
+          }
+        }
+        if (dbExportTest.reason) console.log('[verify]   部分缺失: ' + dbExportTest.reason);
+        if (dbExportTest.hasSke && dbExportTest.hasTexJson && dbExportTest.hasPng) {
+          console.log('[verify] ✓ 龙骨完整 zip 还原数据就绪（panel 可展平写入目录）');
+        } else {
+          console.warn('[verify] ✗ 龙骨导出文件不全');
+        }
+      }
     }
   }
 

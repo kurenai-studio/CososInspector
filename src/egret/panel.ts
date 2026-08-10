@@ -25,9 +25,10 @@ import {
 import { collectSpriteList } from './sprites';
 import { startPickMode, stopPickMode, isPickModeActive } from './nodePicker';
 import { getTextureSourceUrl, getNodeTexture } from './textureExtract';
-import { listDragonBonesUrls } from './dragonBonesExport';
+import { listDragonBonesUrls, exportDragonBones } from './dragonBonesExport';
 import { listSceneSpriteUrls, collectSceneAtlasInfo, collectSubtreeAtlasInfo, type AtlasInfo } from './sceneAssetsExport';
 import { collectResourceList } from './resources';
+import type { SkeletonExportFile } from './skeletonCommon';
 
 declare const __INSPECTOR_VERSION__: string;
 
@@ -197,6 +198,7 @@ export class EgretInspector {
       { key: 'node-subtree', label: '选中节点子树资源（图集+龙骨）' },
       { key: 'node-texture', label: '选中节点纹理 PNG' },
       { key: 'node-dragonbones', label: '选中节点龙骨 zip' },
+      { key: 'node-dragonbones-full', label: '选中节点龙骨完整（内存 ske+tex+png）' },
       { key: 'resources', label: '资源 URL 清单 JSON' },
     ];
     for (const it of dlItems) {
@@ -409,6 +411,51 @@ export class EgretInspector {
     return cleaned.length > 100 ? cleaned.slice(0, 100) : cleaned;
   }
 
+  /** base64 → Blob */
+  private base64ToBlob(b64: string, mime: string): Blob {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type: mime || 'application/octet-stream' });
+  }
+
+  /**
+   * 把 SkeletonExportFile[] 展平写入目录：baseName/{file.name}
+   * - text → Blob([text])
+   * - dataBase64 → base64ToBlob
+   * - url → fetchAndWrite（fallback，CDN 失败也跳过）
+   */
+  private async writeSkeletonFilesToDir(
+    files: SkeletonExportFile[],
+    dir: FileSystemDirectoryHandle,
+    baseName: string
+  ): Promise<{ written: string[]; errors: string[] }> {
+    const written: string[] = [];
+    const errors: string[] = [];
+    for (const f of files) {
+      const relPath = `dragonbones/${this.safeName(baseName)}/${f.name}`;
+      try {
+        if (f.text != null) {
+          await this.writeFileToDir(dir, relPath, new Blob([f.text], { type: f.mime }));
+          written.push(relPath);
+        } else if (f.dataBase64 != null) {
+          await this.writeFileToDir(dir, relPath, this.base64ToBlob(f.dataBase64, f.mime));
+          written.push(relPath);
+        } else if (f.url) {
+          try {
+            await this.fetchAndWrite(f.url, dir, relPath);
+            written.push(relPath);
+          } catch (e) {
+            errors.push(`${f.name}: ${(e as Error).message} (URL fallback 失败)`);
+          }
+        }
+      } catch (e) {
+        errors.push(`${f.name}: ${(e as Error).message}`);
+      }
+    }
+    return { written, errors };
+  }
+
   /**
    * 图集还原核心：收 atlases → 下载原图 → canvas 按 sprite 区域裁剪 → 写入 sprites/
    * 同时把原图备份到 images/，atlas-manifest.json 备份区域信息。
@@ -609,6 +656,22 @@ export class EgretInspector {
             errors.push(`${u.name}: ${(e as Error).message}`);
           }
         }
+      } else if (key === 'node-dragonbones-full') {
+        // 内存回读完整龙骨：调 exportDragonBones → files → 展平到 dragonbones/{name}/
+        const node = this.getSelectedNode();
+        if (!node) throw new Error('请先选中节点');
+        const id = getDisplayId(node);
+        this.setStatus(`从内存提取龙骨 ${id}（ske+tex+png）…`);
+        const r = await exportDragonBones(id);
+        if (!r.ok) {
+          throw new Error(r.error || r.reason || `龙骨 ${id} 导出失败`);
+        }
+        const baseName = r.zipName.replace(/_dragonBones\.zip$/i, '') || id;
+        this.setStatus(`龙骨 ${baseName}: ${r.files.length} 个文件 → 写入 ${dir.name} …`);
+        const wr = await this.writeSkeletonFilesToDir(r.files, dir, baseName);
+        wr.written.forEach((w) => written.push(w));
+        wr.errors.forEach((e) => errors.push(e));
+        this.setStatus(`龙骨 ${baseName} 完成: ${wr.written.length}/${r.files.length} 文件 → ${dir.name}`);
       } else if (key === 'resources') {
         const list = collectResourceList(2000);
         const json = JSON.stringify(list, null, 2);
