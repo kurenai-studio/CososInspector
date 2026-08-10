@@ -300,9 +300,17 @@ export class EgretInspector {
   }
 
   private toggleDownloadMenu(): void {
-    if (!this.downloadMenu) return;
+    if (!this.downloadMenu || !this.downloadBtn) return;
     const open = this.downloadMenu.style.display !== 'none';
-    this.downloadMenu.style.display = open ? 'none' : 'flex';
+    if (open) {
+      this.hideDownloadMenu();
+      return;
+    }
+    // 用 fixed 定位脱离 .cocos-inspector-panel overflow:hidden 限制
+    const rect = this.downloadBtn.getBoundingClientRect();
+    this.downloadMenu.style.display = 'block';
+    this.downloadMenu.style.left = `${Math.max(8, rect.right - 280)}px`;
+    this.downloadMenu.style.top = `${rect.bottom + 4}px`;
   }
 
   private hideDownloadMenu(): void {

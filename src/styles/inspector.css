@@ -246,10 +246,7 @@
 }
 
 .download-menu {
-  position: absolute;
-  bottom: 100%;
-  right: 0;
-  margin-bottom: 4px;
+  position: fixed;
   background: rgba(30, 30, 30, 0.97);
   border: 1px solid rgba(102, 102, 102, 0.6);
   border-radius: 4px;
