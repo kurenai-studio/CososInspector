@@ -16,17 +16,32 @@
 import { getEgretStage, type EgretDisplayObject } from './runtime';
 import { getDisplayName } from './sceneTree';
 import { listSceneSpriteUrls, collectSceneAtlasInfo, type AtlasInfo } from './sceneAssetsExport';
-import { listDragonBones, listDragonBonesUrls } from './dragonBonesExport';
+import { listDragonBones, listDragonBonesUrls, getFactory as getDbFactory } from './dragonBonesExport';
 import { listSpines, getSpineComp, isSpineNode, type SpineListItem } from './spineExport';
 import { listMovieClips } from './movieClipExport';
 import { collectResourceList, type EgretResourceList } from './resources';
 import { getTextureSourceUrl } from './textureExtract';
+import { pushSkeletonData, sanitizeFilename, bytesToBase64, type SkeletonExportFile } from './skeletonCommon';
 
 export interface AssetUrlItem {
   name: string;
   url: string;
   /** 推荐保存相对路径（相对下载根目录） */
   saveAs?: string;
+  /**
+   * Inline 数据（CDN 上根本没有原文件时的回退）。
+   * 当 inlineData 存在时，Node 端应跳过 fetch 直接落盘。
+   * rawData 来自 Egret 内存：factory._dragonBonesDataMap[key].rawData / _textureAtlasDataMap[key][i].rawData
+   */
+  inlineData?: {
+    /** text=直接文本写入；base64=二进制（如 .skel/.dbbin）经 base64 编码 */
+    kind: 'text' | 'base64';
+    mime: string;
+    data: string;
+    bytes: number;
+    /** 来源标记，便于排查 */
+    source: 'memory-rawData';
+  };
 }
 
 export interface DragonBonesUrlGroup {
@@ -98,6 +113,52 @@ function pickUrlPath(url: string): string {
   } catch {
     return url.split('/').pop()?.split('?')[0] || '';
   }
+}
+
+/**
+ * 把内存 rawData 序列化后挂到 url 项的 inlineData 字段。
+ * 复用 pushSkeletonData（等价参考插件 pt()）的三分支逻辑：
+ *   string → text inline
+ *   ArrayBuffer/TypedArray → base64 inline（.skel/.dbbin）
+ *   object 有 skeleton/bones/animations/armature → JSON.stringify text inline
+ */
+function attachInline(target: AssetUrlItem, raw: unknown, mime: string): boolean {
+  const files: SkeletonExportFile[] = [];
+  if (!pushSkeletonData(files, raw, target.name, mime)) return false;
+  const f = files[0];
+  if (!f) return false;
+  if (f.text != null) {
+    target.inlineData = {
+      kind: 'text',
+      mime: f.mime,
+      data: f.text,
+      bytes: f.text.length,
+      source: 'memory-rawData',
+    };
+    // pushSkeletonData 对 ArrayBuffer 会把 name 改成 .skel，同步回 target
+    if (f.name && f.name !== target.name) {
+      target.name = f.name;
+      const safeDir = target.saveAs?.replace(/[^/]+$/, '') || '';
+      target.saveAs = safeDir + f.name;
+    }
+    return true;
+  }
+  if (f.dataBase64 != null) {
+    target.inlineData = {
+      kind: 'base64',
+      mime: f.mime,
+      data: f.dataBase64,
+      bytes: f.bytes ?? Math.round(f.dataBase64.length * 0.75),
+      source: 'memory-rawData',
+    };
+    if (f.name && f.name !== target.name) {
+      target.name = f.name;
+      const safeDir = target.saveAs?.replace(/[^/]+$/, '') || '';
+      target.saveAs = safeDir + f.name;
+    }
+    return true;
+  }
+  return false;
 }
 
 /** 按节点 __cocos_id 在显示树里找节点 */
@@ -210,20 +271,85 @@ export function collectSceneAssetUrls(): SceneAssetUrls {
   }));
 
   // 2) dragonBones
+  //    URL 清单（listDragonBonesUrls）+ 内存 rawData inline（CDN 上根本没有 ske/tex.json 原文件时的回退）
+  //    rawData 来源：factory._dragonBonesDataMap[armatureName].rawData → ske
+  //                  factory._textureAtlasDataMap[armatureName][i].rawData → tex.json
+  //    完全参考 exportDragonBones 的 step 2/3，但走 inlineData 字段，不打包 zip
+  const dbFactory = getDbFactory();
   const dragonBones: DragonBonesUrlGroup[] = [];
   for (const item of listDragonBones()) {
     const r = listDragonBonesUrls(item.id);
     if (!r.ok || !r.urls) continue;
     const safe = sanitize(item.name, `db_${item.id}`);
+    const armName = r.armatureName || item.name;
+    const urls: AssetUrlItem[] = r.urls.map((u) => ({
+      name: u.name,
+      url: u.url,
+      saveAs: `dragonbones/${safe}/${u.name}`,
+    }));
+
+    // 把内存 rawData inline 进对应的 url 项（按 name 匹配 _ske/_tex.json）
+    // ske：factory._dragonBonesDataMap[armatureName].rawData
+    if (dbFactory) {
+      const dbMap =
+        dbFactory._dragonBonesDataMap ?? dbFactory.dragonBonesDataMap;
+      if (dbMap && typeof dbMap === 'object') {
+        const entry = dbMap[armName];
+        const raw = (entry as { rawData?: unknown } | undefined)?.rawData ?? entry;
+        if (raw != null) {
+          const skeFile = urls.find((u) => /_ske[._]/i.test(u.name));
+          const target = skeFile ?? (() => {
+            // 没找到 URL 项，补一条 inline-only（url 用空串标记）
+            const extra: AssetUrlItem = {
+              name: `${armName}_ske.json`,
+              url: '',
+              saveAs: `dragonbones/${safe}/${armName}_ske.json`,
+            };
+            urls.push(extra);
+            return extra;
+          })();
+          attachInline(target, raw, 'application/json');
+        }
+      }
+
+      // tex.json：factory._textureAtlasDataMap[armatureName][i].rawData
+      const atlasMap =
+        dbFactory._textureAtlasDataMap ?? dbFactory.textureAtlasDataMap;
+      if (atlasMap && typeof atlasMap === 'object') {
+        const entries = atlasMap[armName];
+        const list = Array.isArray(entries) ? entries : entries ? [entries] : [];
+        list.forEach((entry, idx) => {
+          const raw =
+            (entry as { rawData?: unknown; textureAtlasRawData?: unknown })
+              ?.rawData ??
+            (entry as { textureAtlasRawData?: unknown })
+              ?.textureAtlasRawData;
+          if (raw == null) return;
+          const texFile = urls.find((u) => /_tex\.json$/i.test(u.name));
+          const target = texFile ?? (() => {
+            const extra: AssetUrlItem = {
+              name: `${armName}_tex.json`,
+              url: '',
+              saveAs: `dragonbones/${safe}/${armName}_tex.json`,
+            };
+            urls.push(extra);
+            return extra;
+          })();
+          attachInline(target, raw, 'application/json');
+          // 标 idx（多 atlas 时避免重名）
+          if (list.length > 1 && target) {
+            target.name = `${armName}_${idx}_tex.json`;
+            target.saveAs = `dragonbones/${safe}/${armName}_${idx}_tex.json`;
+          }
+        });
+      }
+    }
+
     dragonBones.push({
       name: item.name,
       armatureName: r.armatureName,
       nodeId: item.id,
-      urls: r.urls.map((u) => ({
-        name: u.name,
-        url: u.url,
-        saveAs: `dragonbones/${safe}/${u.name}`,
-      })),
+      urls,
     });
   }
 

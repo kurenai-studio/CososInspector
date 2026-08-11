@@ -98,17 +98,25 @@ function safeJoin(root, rel) {
 function collectTasks(data, outRoot, report) {
   const tasks = [];
   const g = data.groups || {};
-  for (const s of (g.sprites || [])) {
-    tasks.push({ url: s.url, saveAs: s.saveAs || `images/${s.name}.png` });
-  }
+  const pushUrlItem = (u, fallbackSaveAs) => {
+    if (!u) return;
+    const saveAs = u.saveAs || fallbackSaveAs;
+    if (u.inlineData) {
+      // 内存 rawData inline 项 — 不走 CDN fetch，直接落盘
+      tasks.push({ url: u.url || '', saveAs, inline: u.inlineData });
+    } else if (u.url) {
+      tasks.push({ url: u.url, saveAs });
+    }
+  };
+  for (const s of (g.sprites || [])) pushUrlItem(s, `images/${s.name}.png`);
   for (const db of (g.dragonBones || [])) {
-    for (const u of (db.urls || [])) tasks.push({ url: u.url, saveAs: u.saveAs });
+    for (const u of (db.urls || [])) pushUrlItem(u);
   }
   for (const sp of (g.spines || [])) {
-    for (const u of (sp.urls || [])) tasks.push({ url: u.url, saveAs: u.saveAs });
+    for (const u of (sp.urls || [])) pushUrlItem(u);
   }
   for (const mc of (g.movieclips || [])) {
-    for (const u of (mc.urls || [])) tasks.push({ url: u.url, saveAs: u.saveAs });
+    for (const u of (mc.urls || [])) pushUrlItem(u);
   }
   if (Array.isArray(g.resources)) {
     let resIdx = 0;
@@ -152,14 +160,29 @@ async function runDownload(jsonPath, outRoot, concurrency, postProcess, onProgre
     while (true) {
       const next = it.next();
       if (next.done) return;
-      const { url, saveAs } = next.value;
-      dlState.currentUrl = url;
+      const { url, saveAs, inline } = next.value;
+      dlState.currentUrl = url || `(inline) ${saveAs}`;
       try {
         const fullPath = safeJoin(outRoot, saveAs);
         if (existsSync(fullPath) && statSync(fullPath).size > 0) {
           dlState.skipped++;
           dlState.log.push(`⊘ ${saveAs} (已存在)`);
           onProgress({ type: 'skip', saveAs, url });
+        } else if (inline) {
+          // 内存 rawData inline — 直接落盘，不 fetch CDN
+          mkdirSync(dirname(fullPath), { recursive: true });
+          let buf;
+          if (inline.kind === 'text') {
+            buf = Buffer.from(inline.data, 'utf-8');
+          } else if (inline.kind === 'base64') {
+            buf = Buffer.from(inline.data, 'base64');
+          } else {
+            throw new Error(`未知 inline.kind: ${inline.kind}`);
+          }
+          writeFileSync(fullPath, buf);
+          dlState.ok++;
+          dlState.log.push(`✓ ${saveAs} (inline ${buf.length}B)`);
+          onProgress({ type: 'ok', saveAs, url, bytes: buf.length, inline: true });
         } else {
           const r = await fetchWithRetry(url);
           if (!r.ok) {

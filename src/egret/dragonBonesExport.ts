@@ -59,7 +59,7 @@ function isArmatureDisplay(node: EgretDisplayObject): boolean {
   return /EgretArmatureDisplay|ArmatureDisplay/i.test(ctor);
 }
 
-function getFactory(): DragonBonesFactoryLike | null {
+export function getFactory(): DragonBonesFactoryLike | null {
   const db = window.dragonBones;
   if (!db) return null;
   const f = db.EgretFactory?.factory ?? db.BaseFactory?.factory;
