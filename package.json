@@ -17,6 +17,8 @@
     "cocos-prepare-sprite": "node tools/mcp-cocos-inspector/prepare-sprite-replace.mjs",
     "build": "node scripts/build.mjs",
     "test": "node tests/run.mjs",
+    "gui": "node tools/scene-downloader-gui.mjs",
+    "gui:dist": "npx @yao-pkg/pkg tools/scene-downloader-gui.mjs --target node20-win-x64 --output dist/SceneDownloader.exe",
     "watch": "node scripts/build.mjs --watch",
     "dev": "node scripts/build.mjs",
     "prod": "node scripts/build.mjs --minify",

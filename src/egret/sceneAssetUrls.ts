@@ -15,7 +15,7 @@
  */
 import { getEgretStage, type EgretDisplayObject } from './runtime';
 import { getDisplayName } from './sceneTree';
-import { listSceneSpriteUrls } from './sceneAssetsExport';
+import { listSceneSpriteUrls, collectSceneAtlasInfo, type AtlasInfo } from './sceneAssetsExport';
 import { listDragonBones, listDragonBonesUrls } from './dragonBonesExport';
 import { listSpines, getSpineComp, isSpineNode, type SpineListItem } from './spineExport';
 import { listMovieClips } from './movieClipExport';
@@ -55,6 +55,7 @@ export interface SceneAssetUrls {
   exportedAt: string;
   groups: {
     sprites: AssetUrlItem[];
+    atlases: AtlasInfo[];
     dragonBones: DragonBonesUrlGroup[];
     spines: SpineUrlGroup[];
     movieclips: MovieClipUrlGroup[];
@@ -62,11 +63,23 @@ export interface SceneAssetUrls {
   };
   totals: {
     sprites: number;
+    atlases: number;
+    atlasSprites: number;
     dragonBones: number;
     spines: number;
     movieclips: number;
     resources: number;
     totalUrls: number;
+  };
+  postProcess: {
+    /** Sprite 图集裁剪（按 atlas.sprites 区域用 sharp 切单张 png + 输出 Cocos plist + Egret json） */
+    spriteAtlas: boolean;
+    /** 龙骨工程整理（同名子目录 ske+tex.json+tex.png） */
+    dragonBones: boolean;
+    /** Spine 工程整理（同名子目录 json/skel+atlas+png） */
+    spine: boolean;
+    /** MovieClip 重组（序列帧目录 + manifest） */
+    movieclip: boolean;
   };
 }
 
@@ -189,6 +202,13 @@ export function collectSceneAssetUrls(): SceneAssetUrls {
     return { name: s.name, url: s.url, saveAs: `images/${fname}` };
   });
 
+  // 1.5) atlases（图集 + 每 sprite 区域，供 GUI 后处理裁剪）
+  const atlases: AtlasInfo[] = collectSceneAtlasInfo().map((a) => ({
+    url: a.url,
+    filename: a.filename,
+    sprites: a.sprites,
+  }));
+
   // 2) dragonBones
   const dragonBones: DragonBonesUrlGroup[] = [];
   for (const item of listDragonBones()) {
@@ -243,6 +263,8 @@ export function collectSceneAssetUrls(): SceneAssetUrls {
 
   const totals = {
     sprites: spriteUrls.length,
+    atlases: atlases.length,
+    atlasSprites: atlases.reduce((n, a) => n + a.sprites.length, 0),
     dragonBones: dragonBones.reduce((n, g) => n + g.urls.length, 0),
     spines: spines.reduce((n, g) => n + g.urls.length, 0),
     movieclips: movieclips.reduce((n, g) => n + g.urls.length, 0),
@@ -256,7 +278,13 @@ export function collectSceneAssetUrls(): SceneAssetUrls {
     scene: sceneName,
     pageUrl,
     exportedAt: new Date().toISOString(),
-    groups: { sprites: spriteUrls, dragonBones, spines, movieclips, resources },
+    groups: { sprites: spriteUrls, atlases, dragonBones, spines, movieclips, resources },
     totals,
+    postProcess: {
+      spriteAtlas: true,
+      dragonBones: true,
+      spine: true,
+      movieclip: true,
+    },
   };
 }
