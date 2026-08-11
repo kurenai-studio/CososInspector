@@ -42,6 +42,7 @@ import { listSpines, exportSpine } from './spineExport';
 import { exportSceneAssets } from './sceneAssetsExport';
 import { listSceneSpriteUrls, collectSceneAtlasInfo, collectSubtreeAtlasInfo } from './sceneAssetsExport';
 import { listMovieClips, exportMovieClip } from './movieClipExport';
+import { collectSceneAssetUrls, type SceneAssetUrls } from './sceneAssetUrls';
 import type { SkeletonExportResult } from './skeletonCommon';
 
 export type EgretTextureDownloadResult =
@@ -318,6 +319,11 @@ export const egretInspectorMcpApi = {
   /** 导出指定 MovieClip 节点的所有帧为 zip（base64 inline） */
   async downloadMovieClip(id: string): Promise<SkeletonExportResult> {
     return exportMovieClip(id);
+  },
+
+  /** 收集整场景所有资源 URL 清单（sprites + dragonBones + spines + movieclips + resources），不拉字节 */
+  collectSceneAssetUrls(): SceneAssetUrls {
+    return collectSceneAssetUrls();
   },
 };
 

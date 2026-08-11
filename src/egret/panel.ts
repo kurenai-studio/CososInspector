@@ -29,6 +29,7 @@ import { listDragonBonesUrls, exportDragonBones } from './dragonBonesExport';
 import { exportSpine } from './spineExport';
 import { exportMovieClip } from './movieClipExport';
 import { listSceneSpriteUrls, collectSceneAtlasInfo, collectSubtreeAtlasInfo, type AtlasInfo } from './sceneAssetsExport';
+import type { SceneAssetUrls } from './sceneAssetUrls';
 import { collectResourceList } from './resources';
 import type { SkeletonExportFile } from './skeletonCommon';
 import { buildCocosPlist, buildEgretJson } from './atlasReconstruct';
@@ -197,6 +198,7 @@ export class EgretInspector {
     this.downloadMenu.style.display = 'none';
     const dlItems: Array<{ key: string; label: string }> = [
       { key: 'scene', label: '整场景下载原图' },
+      { key: 'scene-urls', label: '整场景资源 URL 清单（图片+龙骨+Spine+MovieClip，外部 Node 脚本批量拉取）' },
       { key: 'scene-atlas', label: '整场景图集还原（按 sprite 裁剪）' },
       { key: 'node-subtree', label: '选中节点子树资源（图集+龙骨）' },
       { key: 'node-texture', label: '选中节点纹理 PNG' },
@@ -597,6 +599,29 @@ export class EgretInspector {
           }
         });
         await Promise.all(workers);
+      } else if (key === 'scene-urls') {
+        // 整场景资源 URL 清单：只列 URL，不拉字节（避免内存爆 + egret 卡死）
+        // 输出 scene-urls.json，由外部 Node 脚本 tools/download-scene-urls.mjs 批量拉取
+        this.setStatus('收集场景资源 URL 清单 …');
+        const api = (window as unknown as { __cocosInspectorApi?: { collectSceneAssetUrls?: () => SceneAssetUrls } }).__cocosInspectorApi;
+        if (!api?.collectSceneAssetUrls) {
+          throw new Error('collectSceneAssetUrls 未暴露');
+        }
+        const data = api.collectSceneAssetUrls();
+        const g = data.groups;
+        const groupCounts = {
+          sprites: g.sprites.length,
+          dragonBones: g.dragonBones.length,
+          spines: g.spines.length,
+          movieclips: g.movieclips.length,
+          resources: Array.isArray(g.resources) ? g.resources.length : 0,
+        };
+        const json = JSON.stringify(data, null, 2);
+        await this.writeFileToDir(dir, 'scene-urls.json', new Blob([json], { type: 'application/json' }));
+        written.push('scene-urls.json');
+        this.setStatus(
+          `URL 清单已写入: 共 ${data.totals.totalUrls} 个 URL · 分组 ${JSON.stringify(groupCounts)} → ${dir.name}/scene-urls.json · 下一步执行: node tools/download-scene-urls.mjs ${dir.name}/scene-urls.json`
+        );
       } else if (key === 'scene-atlas') {
         // 整场景图集还原：collectSceneAtlasInfo → downloadAtlasesToDir
         const atlases: AtlasInfo[] = collectSceneAtlasInfo();

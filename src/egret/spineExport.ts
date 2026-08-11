@@ -65,7 +65,7 @@ interface SkeletonDataLike {
   _textureNames?: string[];
 }
 
-function isSpineNode(node: EgretDisplayObject): boolean {
+export function isSpineNode(node: EgretDisplayObject): boolean {
   const sp = window.spine;
   if (!sp) return false;
   try {
@@ -78,7 +78,7 @@ function isSpineNode(node: EgretDisplayObject): boolean {
   return /SkeletonAnimation|SkeletonRenderer|SpineAnimation/i.test(ctor);
 }
 
-function getSpineComp(node: EgretDisplayObject): SpineCompLike | null {
+export function getSpineComp(node: EgretDisplayObject): SpineCompLike | null {
   const n = node as unknown as SpineCompLike;
   if (n.skeletonData || n._skeletonData) return n;
   if (n.templet || n._templet) return n;
