@@ -116,11 +116,73 @@ function pickUrlPath(url: string): string {
 }
 
 /**
+ * 通过 RES.getRes(alias) 从 RES 资源缓存直接拿原始字节/对象。
+ * 参考插件 inspector.js 的 Le() 函数：o.loader.getRes(e) / o.Loader.getRes(e)。
+ *
+ * 龙骨资源通常按 alias 命名：
+ *   armName + "_ske_dbbin" → ArrayBuffer（骨架二进制）
+ *   armName + "_ske_json"  → object 或 string（骨架 JSON）
+ *   armName + "_skel_dbbin"→ ArrayBuffer（部分游戏用 _skel 命名）
+ *   armName + "_tex_json"  → object 或 string（atlas 元数据）
+ *
+ * 返回 { kind, data, mime } 或 null。
+ */
+function tryGetResRaw(alias: string): {
+  kind: 'text' | 'base64';
+  mime: string;
+  data: string;
+  bytes: number;
+} | null {
+  const res = (window as unknown as {
+    RES?: {
+      getRes?: (name: string) => unknown;
+      loader?: { getRes?: (name: string) => unknown };
+      Loader?: { getRes?: (name: string) => unknown };
+    };
+  }).RES;
+  let raw: unknown = null;
+  try {
+    raw = res?.getRes?.(alias);
+    if (raw == null) raw = res?.loader?.getRes?.(alias);
+    if (raw == null) raw = res?.Loader?.getRes?.(alias);
+  } catch {
+    raw = null;
+  }
+  if (raw == null) return null;
+  if (typeof raw === 'string' && raw.length > 0) {
+    return { kind: 'text', mime: 'application/json', data: raw, bytes: raw.length };
+  }
+  if (raw instanceof ArrayBuffer && raw.byteLength > 0) {
+    const b64 = bytesToBase64(new Uint8Array(raw));
+    return { kind: 'base64', mime: 'application/octet-stream', data: b64, bytes: raw.byteLength };
+  }
+  if (ArrayBuffer.isView(raw) && raw.byteLength > 0) {
+    const u8 = new Uint8Array(
+      (raw as ArrayBufferView).buffer,
+      (raw as ArrayBufferView).byteOffset,
+      (raw as ArrayBufferView).byteLength
+    );
+    const b64 = bytesToBase64(u8);
+    return { kind: 'base64', mime: 'application/octet-stream', data: b64, bytes: u8.length };
+  }
+  if (typeof raw === 'object' && raw !== null) {
+    try {
+      const text = JSON.stringify(raw, null, 2);
+      if (text && text.length > 2) {
+        return { kind: 'text', mime: 'application/json', data: text, bytes: text.length };
+      }
+    } catch {
+      /* 可能是循环引用 — 回退 */
+    }
+  }
+  return null;
+}
+
+/**
  * 把内存 rawData 序列化后挂到 url 项的 inlineData 字段。
- * 复用 pushSkeletonData（等价参考插件 pt()）的三分支逻辑：
- *   string → text inline
- *   ArrayBuffer/TypedArray → base64 inline（.skel/.dbbin）
- *   object 有 skeleton/bones/animations/armature → JSON.stringify text inline
+ * 参考插件 pt() + Le() 双路径：
+ *   1) 优先 RES.getRes(alias) 拿已加载的原始字节（ArrayBuffer/string/object）
+ *   2) 回退到 factory._dragonBonesDataMap[key] 直接对象（如果可序列化）
  */
 function attachInline(target: AssetUrlItem, raw: unknown, mime: string): boolean {
   const files: SkeletonExportFile[] = [];
@@ -272,9 +334,12 @@ export function collectSceneAssetUrls(): SceneAssetUrls {
 
   // 2) dragonBones
   //    URL 清单（listDragonBonesUrls）+ 内存 rawData inline（CDN 上根本没有 ske/tex.json 原文件时的回退）
-  //    rawData 来源：factory._dragonBonesDataMap[armatureName].rawData → ske
-  //                  factory._textureAtlasDataMap[armatureName][i].rawData → tex.json
-  //    完全参考 exportDragonBones 的 step 2/3，但走 inlineData 字段，不打包 zip
+  //    rawData 来源优先级：
+  //      a) RES.getRes(armName+"_ske_dbbin") → ArrayBuffer（骨架二进制）
+  //      b) RES.getRes(armName+"_ske_json")  → object 或 string（骨架 JSON）
+  //      c) RES.getRes(armName+"_tex_json")  → object 或 string（atlas 元数据）
+  //      d) RES.getRes(armName+"_tex_png")   → Texture → extractWholeSourceToPng 回读
+  //    完全参考 inspector.js 的 Le()：o.loader.getRes(e) / o.Loader.getRes(e)
   const dbFactory = getDbFactory();
   const dragonBones: DragonBonesUrlGroup[] = [];
   for (const item of listDragonBones()) {
@@ -288,59 +353,94 @@ export function collectSceneAssetUrls(): SceneAssetUrls {
       saveAs: `dragonbones/${safe}/${u.name}`,
     }));
 
-    // 把内存 rawData inline 进对应的 url 项（按 name 匹配 _ske/_tex.json）
-    // ske：factory._dragonBonesDataMap[armatureName].rawData
-    if (dbFactory) {
-      const dbMap =
-        dbFactory._dragonBonesDataMap ?? dbFactory.dragonBonesDataMap;
+    // ske：优先 RES.getRes，回退到 dbMap rawData
+    const skeAliases = [`${armName}_ske_dbbin`, `${armName}_ske_json`, `${armName}_skel_dbbin`, `${armName}_skel_json`];
+    let skeDone = false;
+    for (const alias of skeAliases) {
+      const raw = tryGetResRaw(alias);
+      if (!raw) continue;
+      // 找已存在的 ske url 项；否则补 inline-only
+      let target = urls.find((u) => /_ske[._]/i.test(u.name) && !u.inlineData);
+      if (!target) {
+        target = {
+          name: raw.kind === 'base64' ? `${armName}_ske.dbbin` : `${armName}_ske.json`,
+          url: '',
+          saveAs: `dragonbones/${safe}/${raw.kind === 'base64' ? `${armName}_ske.dbbin` : `${armName}_ske.json`}`,
+        };
+        urls.push(target);
+      }
+      target.inlineData = {
+        kind: raw.kind,
+        mime: raw.mime,
+        data: raw.data,
+        bytes: raw.bytes,
+        source: 'memory-rawData',
+      };
+      skeDone = true;
+      break;
+    }
+    // 回退：factory._dragonBonesDataMap[armName] 直接对象（一般会因循环引用失败，但试一次）
+    if (!skeDone && dbFactory) {
+      const dbMap = dbFactory._dragonBonesDataMap ?? dbFactory.dragonBonesDataMap;
       if (dbMap && typeof dbMap === 'object') {
         const entry = dbMap[armName];
         const raw = (entry as { rawData?: unknown } | undefined)?.rawData ?? entry;
         if (raw != null) {
-          const skeFile = urls.find((u) => /_ske[._]/i.test(u.name));
-          const target = skeFile ?? (() => {
-            // 没找到 URL 项，补一条 inline-only（url 用空串标记）
-            const extra: AssetUrlItem = {
+          let target = urls.find((u) => /_ske[._]/i.test(u.name) && !u.inlineData);
+          if (!target) {
+            target = {
               name: `${armName}_ske.json`,
               url: '',
               saveAs: `dragonbones/${safe}/${armName}_ske.json`,
             };
-            urls.push(extra);
-            return extra;
-          })();
+            urls.push(target);
+          }
           attachInline(target, raw, 'application/json');
         }
       }
+    }
 
-      // tex.json：factory._textureAtlasDataMap[armatureName][i].rawData
-      const atlasMap =
-        dbFactory._textureAtlasDataMap ?? dbFactory.textureAtlasDataMap;
+    // tex.json：优先 RES.getRes
+    const texJsonRaw = tryGetResRaw(`${armName}_tex_json`);
+    if (texJsonRaw) {
+      let target = urls.find((u) => /_tex\.json$/i.test(u.name) && !u.inlineData);
+      if (!target) {
+        target = {
+          name: `${armName}_tex.json`,
+          url: '',
+          saveAs: `dragonbones/${safe}/${armName}_tex.json`,
+        };
+        urls.push(target);
+      }
+      target.inlineData = {
+        kind: texJsonRaw.kind,
+        mime: texJsonRaw.mime,
+        data: texJsonRaw.data,
+        bytes: texJsonRaw.bytes,
+        source: 'memory-rawData',
+      };
+    } else if (dbFactory) {
+      // 回退：atlasMap rawData
+      const atlasMap = dbFactory._textureAtlasDataMap ?? dbFactory.textureAtlasDataMap;
       if (atlasMap && typeof atlasMap === 'object') {
         const entries = atlasMap[armName];
         const list = Array.isArray(entries) ? entries : entries ? [entries] : [];
         list.forEach((entry, idx) => {
           const raw =
-            (entry as { rawData?: unknown; textureAtlasRawData?: unknown })
-              ?.rawData ??
-            (entry as { textureAtlasRawData?: unknown })
-              ?.textureAtlasRawData;
+            (entry as { rawData?: unknown; textureAtlasRawData?: unknown })?.rawData ??
+            (entry as { textureAtlasRawData?: unknown })?.textureAtlasRawData;
           if (raw == null) return;
-          const texFile = urls.find((u) => /_tex\.json$/i.test(u.name));
-          const target = texFile ?? (() => {
-            const extra: AssetUrlItem = {
-              name: `${armName}_tex.json`,
+          let target = urls.find((u) => /_tex\.json$/i.test(u.name) && !u.inlineData);
+          if (!target) {
+            const fname = list.length > 1 ? `${armName}_${idx}_tex.json` : `${armName}_tex.json`;
+            target = {
+              name: fname,
               url: '',
-              saveAs: `dragonbones/${safe}/${armName}_tex.json`,
+              saveAs: `dragonbones/${safe}/${fname}`,
             };
-            urls.push(extra);
-            return extra;
-          })();
-          attachInline(target, raw, 'application/json');
-          // 标 idx（多 atlas 时避免重名）
-          if (list.length > 1 && target) {
-            target.name = `${armName}_${idx}_tex.json`;
-            target.saveAs = `dragonbones/${safe}/${armName}_${idx}_tex.json`;
+            urls.push(target);
           }
+          attachInline(target, raw, 'application/json');
         });
       }
     }
