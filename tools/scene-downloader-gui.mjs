@@ -15,6 +15,7 @@
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { argv, platform } from 'node:process';
 
@@ -494,12 +495,15 @@ const HTML_PAGE = `<!DOCTYPE html>
     <div class="row">
       <label>JSON 清单</label>
       <div class="path" id="jsonPath">(未选择)</div>
-      <div class="actions"><button class="secondary" onclick="pickJson()">选择</button></div>
+      <div class="actions">
+        <input type="file" id="fileJson" accept=".json,application/json" style="display:none" onchange="onJsonPicked(this)" />
+        <button class="secondary" onclick="document.getElementById('fileJson').click()">选择 JSON</button>
+      </div>
     </div>
     <div class="row">
       <label>下载目录</label>
-      <div class="path" id="outDir">(未选择)</div>
-      <div class="actions"><button class="secondary" onclick="pickDir()">选择</button></div>
+      <input type="text" id="outDirInput" value="D:/self_project/H5-egret-res/downloaded2" placeholder="可手动输入或粘贴绝对路径" style="flex:1;padding:8px 12px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#fff;font-family:monospace;font-size:12px;min-height:32px" />
+      <button class="secondary" onclick="useLastDir()">上次目录</button>
     </div>
     <div class="row">
       <label>并发数</label>
@@ -541,6 +545,12 @@ const HTML_PAGE = `<!DOCTYPE html>
 let jsonPath = '';
 let outDir = '';
 
+// 默认下载目录：优先 localStorage 记忆，其次内置默认
+(function initOutDir() {
+  const saved = localStorage.getItem('lastOutDir');
+  if (saved) document.getElementById('outDirInput').value = saved;
+})();
+
 async function api(path, body) {
   const r = await fetch(path, {
     method: 'POST',
@@ -550,29 +560,52 @@ async function api(path, body) {
   return r.json();
 }
 
-async function pickJson() {
-  const r = await api('/api/pick-json', {});
-  if (r.ok) {
-    jsonPath = r.path;
-    document.getElementById('jsonPath').textContent = r.path;
-    updateStartBtn();
+// JSON 文件：浏览器原生 input[type=file] → FormData 上传到 Node 端临时保存
+async function onJsonPicked(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  document.getElementById('jsonPath').textContent = '上传中: ' + f.name + '…';
+  const fd = new FormData();
+  fd.append('file', f);
+  try {
+    const r = await fetch('/api/upload-json', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (j.ok) {
+      jsonPath = j.path;
+      document.getElementById('jsonPath').textContent = j.path + ' (' + f.size + 'B)';
+      updateStartBtn();
+    } else {
+      document.getElementById('jsonPath').textContent = '上传失败: ' + (j.error || '未知错误');
+    }
+  } catch (e) {
+    document.getElementById('jsonPath').textContent = '上传异常: ' + e.message;
   }
+  // 重置 input，允许重复选同一个文件
+  input.value = '';
 }
 
-async function pickDir() {
-  const r = await api('/api/pick-dir', {});
-  if (r.ok) {
-    outDir = r.path;
-    document.getElementById('outDir').textContent = r.path;
-    updateStartBtn();
+function useLastDir() {
+  const saved = localStorage.getItem('lastOutDir');
+  if (saved) {
+    document.getElementById('outDirInput').value = saved;
+  } else {
+    alert('没有上次目录记录，请手动输入或粘贴绝对路径');
   }
 }
 
 function updateStartBtn() {
+  const dir = document.getElementById('outDirInput').value.trim();
+  outDir = dir;
   document.getElementById('startBtn').disabled = !(jsonPath && outDir);
 }
 
+// 文本框输入时实时同步 outDir + 启用按钮
+document.getElementById('outDirInput').addEventListener('input', updateStartBtn);
+
 async function start() {
+  outDir = document.getElementById('outDirInput').value.trim();
+  if (!outDir) { alert('请填写下载目录'); return; }
+  localStorage.setItem('lastOutDir', outDir);
   const c = parseInt(document.getElementById('concurrency').value, 10) || 8;
   const postProcess = {
     spriteAtlas: document.getElementById('pp-spriteAtlas').checked,
@@ -686,6 +719,68 @@ const server = createServer((req, res) => {
     res.write(': connected\n\n');
     subscribers.add(res);
     req.on('close', () => subscribers.delete(res));
+    return;
+  }
+
+  // JSON 文件上传：浏览器原生 input[type=file] → FormData → 这里接收保存到 tmp
+  // 替代 PowerShell 对话框（用户报告 STA 也不弹窗）
+  if (req.method === 'POST' && url.pathname === '/api/upload-json') {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      try {
+        const boundary = (req.headers['content-type'] || '').match(/boundary=(.+)/);
+        if (!boundary) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'multipart boundary 未找到' }));
+          return;
+        }
+        const buf = Buffer.concat(chunks);
+        // 简易 multipart 解析：按 boundary 分块
+        const sep = Buffer.from('--' + boundary[1]);
+        const parts = [];
+        let start = 0;
+        while (true) {
+          const idx = buf.indexOf(sep, start);
+          if (idx < 0) break;
+          if (idx > start) parts.push(buf.slice(start, idx));
+          start = idx + sep.length;
+          // 结束标记
+          if (buf.slice(start, start + 2).toString() === '--') break;
+          // 跳过 \r\n
+          start += 2;
+        }
+        // 找含 filename= 的 part（实际文件内容）
+        let fileBuf = null;
+        let filename = 'scene-urls.json';
+        for (const p of parts) {
+          const s = p.toString();
+          const hdrEnd = s.indexOf('\r\n\r\n');
+          if (hdrEnd < 0) continue;
+          const header = s.slice(0, hdrEnd);
+          if (/filename=/.test(header)) {
+            const m = header.match(/filename="([^"]+)"/);
+            if (m) filename = m[1];
+            fileBuf = p.slice(hdrEnd + 4, p.length - 2); // 去尾 \r\n
+            break;
+          }
+        }
+        if (!fileBuf) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: '未找到文件内容' }));
+          return;
+        }
+        const tmpDir = join(tmpdir(), 'scene-downloader');
+        mkdirSync(tmpDir, { recursive: true });
+        const outPath = join(tmpDir, `scene-urls-${Date.now()}.json`);
+        writeFileSync(outPath, fileBuf);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, path: outPath, bytes: fileBuf.length }));
+      } catch (e) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+    });
     return;
   }
 
