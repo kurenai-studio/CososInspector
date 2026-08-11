@@ -5,6 +5,8 @@
 场景节点 UUID / 压缩 UUID 展开等）；另见 **Bundle 逻辑还原**——
 [bundle-logic-recovery.md](features/bundle-logic-recovery.md)。
 
+**怎么用（简要）** → [features/usage.md](features/usage.md)（面板 UI vs MCP/CLI）
+
 ## Agent Skills（本仓库）
 
 | Skill | 路径 | 何时读 |
@@ -20,6 +22,7 @@
 
 | 文档 | 说明 |
 |------|------|
+| [usage.md](features/usage.md) | **怎么用（简要）**：装扩展、面板、MCP、Dump |
 | [cocos2-support.md](features/cocos2-support.md) | Creator 2.x（含 2.4）P0–P8a 支持 |
 | [pixi-support.md](features/pixi-support.md) | PixiJS MVP（stage / MCP / 截图） |
 | [scene-recovery.md](features/scene-recovery.md) | Inspector → Creator 场景恢复（详细） |

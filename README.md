@@ -35,6 +35,11 @@ npm run cocos-scene-to-creator -- tmp/scene-snapshot.json `
   --clear --with-textures --page-url-match godeebxp
 ```
 
+## 怎么用
+
+简要说明（面板有什么、Dump/后处理走 MCP·CLI）：  
+**[docs/features/usage.md](docs/features/usage.md)**
+
 ## 构建与安装
 
 ```bash
