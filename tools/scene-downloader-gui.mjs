@@ -503,8 +503,11 @@ const HTML_PAGE = `<!DOCTYPE html>
     </div>
     <div class="row">
       <label>下载目录</label>
-      <input type="text" id="outDirInput" value="D:/self_project/H5-egret-res/downloaded2" placeholder="可手动输入或粘贴绝对路径" style="flex:1;padding:8px 12px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#fff;font-family:monospace;font-size:12px;min-height:32px" />
-      <button class="secondary" onclick="useLastDir()">上次目录</button>
+      <div class="path" id="outDirDisplay">(未选择)</div>
+      <div class="actions">
+        <input type="file" id="dirPicker" webkitdirectory directory multiple style="display:none" onchange="onDirPicked(this)" />
+        <button class="secondary" onclick="document.getElementById('dirPicker').click()">选择目录</button>
+      </div>
     </div>
     <div class="row">
       <label>并发数</label>
@@ -549,7 +552,8 @@ let outDir = '';
 // 默认下载目录：优先 localStorage 记忆，其次内置默认
 (function initOutDir() {
   const saved = localStorage.getItem('lastOutDir');
-  if (saved) document.getElementById('outDirInput').value = saved;
+  outDir = saved || 'D:/self_project/H5-egret-res/downloaded2';
+  document.getElementById('outDirDisplay').textContent = outDir;
 })();
 
 async function api(path, body) {
@@ -585,27 +589,41 @@ async function onJsonPicked(input) {
   input.value = '';
 }
 
-function useLastDir() {
-  const saved = localStorage.getItem('lastOutDir');
-  if (saved) {
-    document.getElementById('outDirInput').value = saved;
-  } else {
-    alert('没有上次目录记录，请手动输入或粘贴绝对路径');
+// 下载目录：浏览器原生 input[webkitdirectory]
+// Chrome 桌面版 File.path 有目录绝对路径（非标准 API，但桌面 Chrome 一直支持）
+// fallback：webkitRelativePath 第一段是相对目录名，需用户手动补绝对路径
+async function onDirPicked(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  let dir = '';
+  // Chrome 桌面版：File.path = 'D:\\path\\to\\dir\\file.txt'
+  if (f.path) {
+    // 截取最后一个路径分隔符之前的部分
+    const p = String(f.path).replace(/[\\/]+/g, '/');
+    dir = p.substring(0, p.lastIndexOf('/'));
+  } else if (f.webkitRelativePath) {
+    // fallback：拿根目录名，提示用户手动补绝对路径
+    const root = String(f.webkitRelativePath).split('/')[0];
+    dir = '(仅根目录名: ' + root + ') 请手动输入完整路径';
   }
+  if (dir && !dir.startsWith('(')) {
+    outDir = dir;
+    localStorage.setItem('lastOutDir', outDir);
+    document.getElementById('outDirDisplay').textContent = outDir;
+    updateStartBtn();
+  } else {
+    document.getElementById('outDirDisplay').textContent = dir || '无法获取目录路径,请手动输入';
+  }
+  // 重置 input，允许重复选同一个目录
+  input.value = '';
 }
 
 function updateStartBtn() {
-  const dir = document.getElementById('outDirInput').value.trim();
-  outDir = dir;
   document.getElementById('startBtn').disabled = !(jsonPath && outDir);
 }
 
-// 文本框输入时实时同步 outDir + 启用按钮
-document.getElementById('outDirInput').addEventListener('input', updateStartBtn);
-
 async function start() {
-  outDir = document.getElementById('outDirInput').value.trim();
-  if (!outDir) { alert('请填写下载目录'); return; }
+  if (!outDir) { alert('请选择下载目录'); return; }
   localStorage.setItem('lastOutDir', outDir);
   const c = parseInt(document.getElementById('concurrency').value, 10) || 8;
   const postProcess = {
