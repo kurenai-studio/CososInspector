@@ -322,9 +322,10 @@ async function runPostProcess(data, outRoot, postProcess, onProgress) {
       const files = (db.urls || []).map((u) => u.name);
       const present = files.filter((n) => existsSync(join(dir, n)));
       // 完整工程标准:至少 1 个 ske 文件 + 1 个 tex.json + 1 个 tex 图
+      // 注意：atlas 图文件名是 `${armatureName}.png`（无 _tex 中缀），所以正则放宽
       const hasSke = present.some((n) => /_ske[._]/i.test(n));
       const hasTexJson = present.some((n) => /_tex\.json$/i.test(n));
-      const hasTexImg = present.some((n) => /_tex\.(png|webp|jpg)$/i.test(n));
+      const hasTexImg = present.some((n) => /\.(png|webp|jpg|jpeg)$/i.test(n));
       const complete = hasSke && hasTexJson && hasTexImg;
       writeFileSync(join(dir, '_project.json'), JSON.stringify({
         type: 'dragonBones',
