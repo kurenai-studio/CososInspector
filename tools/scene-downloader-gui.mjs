@@ -23,15 +23,19 @@ const MAX_RETRY = 3;
 const RETRY_DELAY_MS = 800;
 
 // ───────────────── PowerShell 对话框（Windows 原生） ─────────────────
+// 关键：必须用 -STA（Single-Threaded Apartment）模式。
+// System.Windows.Forms.*Dialog.ShowDialog() 在 MTA 模式下可能不弹窗或直接返回 Cancel
+// （用户报告："点击选择文件,并不会吊起本地的文件系统接口"）
 function pickFileViaPowerShell(filterDesc, filterExt) {
   const ps = `
 Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.Application]::EnableVisualStyles()
 $dlg = New-Object System.Windows.Forms.OpenFileDialog
 $dlg.Filter = '${filterDesc}|${filterExt}'
 $dlg.Title = '选择 ${filterDesc}'
 if ($dlg.ShowDialog() -eq 'OK') { Write-Output $dlg.FileName }
 `.trim();
-  const r = spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8' });
+  const r = spawnSync('powershell', ['-NoProfile', '-STA', '-Command', ps], { encoding: 'utf8', windowsHide: false });
   if (r.status !== 0) return null;
   return r.stdout.trim() || null;
 }
@@ -39,12 +43,13 @@ if ($dlg.ShowDialog() -eq 'OK') { Write-Output $dlg.FileName }
 function pickFolderViaPowerShell() {
   const ps = `
 Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.Application]::EnableVisualStyles()
 $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
 $dlg.Description = '选择下载目录'
 $dlg.ShowNewFolderButton = $true
 if ($dlg.ShowDialog() -eq 'OK') { Write-Output $dlg.SelectedPath }
 `.trim();
-  const r = spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8' });
+  const r = spawnSync('powershell', ['-NoProfile', '-STA', '-Command', ps], { encoding: 'utf8', windowsHide: false });
   if (r.status !== 0) return null;
   return r.stdout.trim() || null;
 }
@@ -111,12 +116,24 @@ function collectTasks(data, outRoot, report) {
       const url = r?.url || r?.src || r?.configUrl;
       if (!url) continue;
       const name = r?.name || r?.alias || `res_${resIdx++}`;
-      const ext = url.split('/').pop()?.split('?')[0]?.split('.').pop() || 'bin';
-      tasks.push({ url, saveAs: `resources/${name}.${ext}` });
+      const ext = (url.split('/').pop()?.split('?')[0]?.split('.').pop() || 'bin').toLowerCase();
+      const category = categorizeExt(ext);
+      tasks.push({ url, saveAs: `resources/${category}/${name}.${ext}` });
       resIdx++;
     }
   }
   return tasks;
+}
+
+function categorizeExt(ext) {
+  if (/^(mp3|wav|ogg|m4a|aac|flac)$/i.test(ext)) return 'audio';
+  if (/^(csv|json|xml|txt|ini|cfg|conf)$/i.test(ext)) return 'data';
+  if (/^(png|jpg|jpeg|webp|gif|bmp|tga)$/i.test(ext)) return 'images';
+  if (/^(dbbin|skel|atlas|fnt|plist)$/i.test(ext)) return 'skeleton';
+  if (/^(mp4|webm|avi|mov)$/i.test(ext)) return 'video';
+  if (/^(ttf|otf|woff|woff2)$/i.test(ext)) return 'fonts';
+  if (/^(js|mjs|cjs)$/i.test(ext)) return 'scripts';
+  return 'other';
 }
 
 // ───────────────── 全局状态（单实例下载） ─────────────────
@@ -271,57 +288,94 @@ async function runPostProcess(data, outRoot, postProcess, onProgress) {
     out.spriteAtlas = stats;
   }
 
-  // 2) 龙骨工程整理:文件已在 dragonbones/{name}/ 下,补 _project.json 索引
+  // 2) 龙骨工程整理:文件已在 dragonbones/{name}/ 下,补 _project.json 索引 + 完整度判定
   if (postProcess?.dragonBones && Array.isArray(g.dragonBones)) {
     let count = 0;
+    let completeCount = 0;
     for (const db of g.dragonBones) {
       const dir = safeJoin(outRoot, `dragonbones/${sanitizeName(db.name, `db_${db.nodeId || ''}`)}`);
       if (!existsSync(dir)) continue;
+      const files = (db.urls || []).map((u) => u.name);
+      const present = files.filter((n) => existsSync(join(dir, n)));
+      // 完整工程标准:至少 1 个 ske 文件 + 1 个 tex.json + 1 个 tex 图
+      const hasSke = present.some((n) => /_ske[._]/i.test(n));
+      const hasTexJson = present.some((n) => /_tex\.json$/i.test(n));
+      const hasTexImg = present.some((n) => /_tex\.(png|webp|jpg)$/i.test(n));
+      const complete = hasSke && hasTexJson && hasTexImg;
       writeFileSync(join(dir, '_project.json'), JSON.stringify({
         type: 'dragonBones',
         name: db.name,
         armatureName: db.armatureName,
         nodeId: db.nodeId,
-        files: (db.urls || []).map((u) => u.name),
+        files,
+        present,
+        missing: files.filter((n) => !present.includes(n)),
+        complete,
+        note: complete ? '完整工程:ske+tex.json+tex 图齐全' : '不完整:缺 ske/tex.json/tex 图之一,可能 CDN 改写',
       }, null, 2));
       count++;
+      if (complete) completeCount++;
+      onProgress({ type: 'post-progress', phase: '龙骨整理', saveAs: `dragonbones/${sanitizeName(db.name, `db_${db.nodeId || ''}`)}/_project.json${complete ? ' (完整)' : ' (不完整)'}`, cls: complete ? 'ok' : 'fail' });
     }
-    out.dragonBones = count;
+    out.dragonBones = { groups: count, complete: completeCount };
   }
 
   // 3) Spine 工程整理
   if (postProcess?.spine && Array.isArray(g.spines)) {
     let count = 0;
+    let completeCount = 0;
     for (const sp of g.spines) {
       const dir = safeJoin(outRoot, `spines/${sanitizeName(sp.name)}`);
       if (!existsSync(dir)) continue;
+      const files = (sp.urls || []).map((u) => u.name);
+      const present = files.filter((n) => existsSync(join(dir, n)));
+      // Spine 完整:json/skel + atlas + 至少 1 个 png
+      const hasSkeleton = present.some((n) => /\.(json|skel)$/i.test(n) && !/\.atlas$/i.test(n));
+      const hasAtlas = present.some((n) => /\.atlas$/i.test(n));
+      const hasPng = present.some((n) => /\.(png|webp|jpg)$/i.test(n));
+      const complete = hasSkeleton && hasAtlas && hasPng;
       writeFileSync(join(dir, '_project.json'), JSON.stringify({
         type: 'spine',
         name: sp.name,
         nodeId: sp.nodeId,
-        files: (sp.urls || []).map((u) => u.name),
+        files,
+        present,
+        missing: files.filter((n) => !present.includes(n)),
+        complete,
       }, null, 2));
       count++;
+      if (complete) completeCount++;
+      onProgress({ type: 'post-progress', phase: 'Spine 整理', saveAs: `spines/${sanitizeName(sp.name)}/_project.json${complete ? ' (完整)' : ' (不完整)'}`, cls: complete ? 'ok' : 'fail' });
     }
-    out.spine = count;
+    out.spine = { groups: count, complete: completeCount };
   }
 
-  // 4) MovieClip 重组:已在 movieclips/{name}/ 下,补 _project.json
+  // 4) MovieClip 重组:已在 movieclips/{name}/ 下,补 _project.json + 完整度
   if (postProcess?.movieclip && Array.isArray(g.movieclips)) {
     let count = 0;
+    let completeCount = 0;
     for (const mc of g.movieclips) {
       const dir = safeJoin(outRoot, `movieclips/${sanitizeName(mc.name, `mc_${mc.nodeId || ''}`)}`);
       if (!existsSync(dir)) continue;
+      const files = (mc.urls || []).map((u) => u.name);
+      const present = files.filter((n) => existsSync(join(dir, n)));
+      // MovieClip 完整:所有帧 PNG 都下载到
+      const complete = present.length === files.length && files.length > 0;
       writeFileSync(join(dir, '_project.json'), JSON.stringify({
         type: 'movieclip',
         name: mc.name,
         nodeId: mc.nodeId,
         frameCount: mc.frameCount,
-        files: (mc.urls || []).map((u) => u.name),
+        files,
+        present,
+        missing: files.filter((n) => !present.includes(n)),
+        complete,
       }, null, 2));
       count++;
+      if (complete) completeCount++;
+      onProgress({ type: 'post-progress', phase: 'MovieClip 重组', saveAs: `movieclips/${sanitizeName(mc.name, `mc_${mc.nodeId || ''}`)}/_project.json${complete ? ' (完整)' : ' (不完整)'}`, cls: complete ? 'ok' : 'fail' });
     }
-    out.movieclip = count;
+    out.movieclip = { groups: count, complete: completeCount };
   }
 
   return out;
@@ -550,9 +604,9 @@ function handleEvent(d) {
   } else if (d.type === 'post-done') {
     const parts = [];
     if (d.spriteAtlas) parts.push('图集裁剪 ' + d.spriteAtlas.ok + '/' + d.spriteAtlas.total);
-    if (d.dragonBones) parts.push('龙骨 ' + d.dragonBones);
-    if (d.spine) parts.push('Spine ' + d.spine);
-    if (d.movieclip) parts.push('MovieClip ' + d.movieclip);
+    if (d.dragonBones) parts.push('龙骨 ' + d.dragonBones.complete + '/' + d.dragonBones.groups + ' 完整工程');
+    if (d.spine) parts.push('Spine ' + d.spine.complete + '/' + d.spine.groups + ' 完整工程');
+    if (d.movieclip) parts.push('MovieClip ' + d.movieclip.complete + '/' + d.movieclip.groups + ' 完整工程');
     document.getElementById('status').textContent = '全部完成 · ' + (parts.join(' · ') || '无后处理') + ' · 报告: ' + d.reportPath;
     appendLog('ok', '── 后处理完成 · 报告 ' + d.reportPath + ' ──');
   } else if (d.type === 'post-progress') {

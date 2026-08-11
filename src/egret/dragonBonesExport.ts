@@ -199,30 +199,32 @@ export function listDragonBonesUrls(id: string): {
     });
   }
 
-  // 3) ske/tex.json URL：在 collectResourceList 的 alias 里前缀匹配
+  // 3) ske/tex.json URL：在 collectResourceList 的 alias 里严格前缀匹配
+  //    只接受 _ske / _tex 后缀的项，过滤 mp3/csv/png 等非龙骨文件
   const resList = collectResourceList(2000);
   if (resList.ok && resList.items) {
     const needle = armatureName.toLowerCase();
+    // 严格前缀匹配：alias 必须以 armatureName + _ 开头，避免 'open' 命中 mp3/csv
+    const prefixRe = new RegExp('^' + needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[_.]');
     for (const it of resList.items) {
       const alias = (it.name || '').toLowerCase();
-      // alias 形如 eff_bkbyH5_cb_2437_ske_dbbin / eff_bkbyH5_cb_2437_tex_json
-      if (!alias.includes(needle)) continue;
-      if (!seen.has(it.url)) {
-        seen.add(it.url);
-        const kind: DragonBonesUrlItem['kind'] = /_ske[_.]/.test(alias)
-          ? 'ske'
-          : /_tex[_.]json/.test(alias)
-          ? 'tex-json'
-          : /_tex[_.]png/.test(alias)
-          ? 'tex-png'
-          : 'other';
-        // 文件名：alias → 标准 ske/tex 命名
-        let fname = it.name;
-        if (kind === 'ske') fname = `${armatureName}_ske${/\.json$/i.test(it.name) ? '.json' : '.dbbin'}`;
-        else if (kind === 'tex-json') fname = `${armatureName}_tex.json`;
-        else if (kind === 'tex-png') fname = `${armatureName}_tex.png`;
-        urls.push({ name: fname, url: it.url, kind });
-      }
+      if (!prefixRe.test(alias)) continue;
+      // 只接受 _ske 或 _tex 后缀，其它（mp3/csv/png 等）一律过滤
+      const isSke = /_ske[_.]/.test(alias) || /_skel[_.]/.test(alias);
+      const isTexJson = /_tex[_.]json/.test(alias);
+      const isTexPng = /_tex[_.]png/.test(alias);
+      if (!isSke && !isTexJson && !isTexPng) continue;
+      if (seen.has(it.url)) continue;
+      seen.add(it.url);
+      const kind: DragonBonesUrlItem['kind'] = isSke ? 'ske' : isTexJson ? 'tex-json' : 'tex-png';
+      // tex.png 已在 step 2 从 atlas renderTexture 拿到（运行时实际加载的 webp URL，
+      // 比这里的 png URL 更可靠），跳过避免重复且 404
+      if (kind === 'tex-png') continue;
+      // 文件名：alias → 标准 ske/tex 命名
+      let fname = it.name;
+      if (kind === 'ske') fname = `${armatureName}_ske${/\.json$/i.test(it.name) ? '.json' : '.dbbin'}`;
+      else if (kind === 'tex-json') fname = `${armatureName}_tex.json`;
+      urls.push({ name: fname, url: it.url, kind });
     }
   }
 
