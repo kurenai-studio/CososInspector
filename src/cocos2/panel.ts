@@ -1,5 +1,9 @@
 import { logEngine } from '../engine/detect';
 import {
+  bindMcpInstallGuide,
+  syncMcpGuideClickable,
+} from '../engine/mcpInstallGuide';
+import {
   countNodes,
   expandMatchingNodes,
   renderTreeHtml,
@@ -119,6 +123,7 @@ export class CocosInspector2 {
       '<span class="mcp-status-dot" aria-hidden="true"></span><span class="mcp-status-label">MCP</span>';
     this.updateMcpStatus('disconnected', 17373);
     headerTop.appendChild(this.mcpStatusEl);
+    if (this.panel) bindMcpInstallGuide(this.mcpStatusEl, this.panel);
 
     header.appendChild(headerTop);
 
@@ -204,7 +209,11 @@ export class CocosInspector2 {
       disconnected:
         `未连接 MCP。请在 Cursor 启用 cocos-inspector MCP，并确认端口 ${port} 可用。`,
     };
-    this.mcpStatusEl.title = hints[status] ?? `MCP 状态: ${status}`;
+    this.mcpStatusEl.title =
+      status === 'disconnected'
+        ? '未连接 MCP。点击查看安装指引'
+        : hints[status] ?? `MCP 状态: ${status}`;
+    syncMcpGuideClickable(this.mcpStatusEl, status);
   }
 
   private setCollapsed(collapsed: boolean): void {

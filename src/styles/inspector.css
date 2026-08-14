@@ -167,6 +167,79 @@
   background: #777;
 }
 
+.mcp-status--clickable {
+  cursor: pointer;
+}
+
+.mcp-status--clickable:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.mcp-install-guide {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 64px;
+  z-index: 30;
+  padding: 10px 12px;
+  background: rgba(22, 24, 28, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.mcp-install-guide-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.mcp-install-guide-lead {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.mcp-install-guide-link {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: #8ec8ff;
+  word-break: break-all;
+}
+
+.mcp-install-guide-steps {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.mcp-install-guide-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.mcp-install-guide-copy,
+.mcp-install-guide-close {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(68, 68, 68, 0.75);
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.mcp-install-guide-copy:hover,
+.mcp-install-guide-close:hover {
+  background: rgba(85, 85, 85, 0.9);
+}
+
 @keyframes mcp-pulse {
   0%,
   100% {
