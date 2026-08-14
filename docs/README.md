@@ -18,6 +18,9 @@
 
 | 文档 | 说明 |
 |------|------|
+| [../CHANGELOG.md](../CHANGELOG.md) | 商店发布后的版本变更（后续优化必记） |
+| [chrome-web-store.md](chrome-web-store.md) | Chrome 网上应用店上架清单与文案 |
+| [privacy.md](privacy.md) | 扩展隐私政策（商店提交用） |
 | [cocos2-support.md](features/cocos2-support.md) | Creator 2.x（含 2.4）P0–P8a 支持 |
 | [pixi-support.md](features/pixi-support.md) | PixiJS MVP（stage / MCP / 截图） |
 | [egret-support.md](features/egret-support.md) | Egret 5.x MVP（树 / 贴图 / 资源清单 / 原始资源下载） |

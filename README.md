@@ -14,7 +14,7 @@
 - 场景节点树、Inspector 组件面板（含 **Node 位置**、扩展 **版本号**）
 - 工具栏 **暂停/继续**（`director.pause`），停住后看节点属性；MCP：`cocos_pause_game` 等
 - MCP：`cocos_export_scene_snapshot`、`cocos_download_texture`、`scene-to-creator` 等
-- Spine / BMFont 内存导出（Cocos 3.x）、DragonBones / Spine 内存导出（Egret）、DC 扫描、资源浮窗
+- Spine / BMFont 内存导出（Cocos 3.x）、DragonBones / Spine 内存导出（Egret）
 - 与 Creator **cocos-meta-mcp** 配合复刻试玩场景（见下方 Skill）
 
 ### 分支（换皮）
@@ -46,6 +46,15 @@ npm run build
 1. 打开 `chrome://extensions/`
 2. 开启开发者模式
 3. 加载已解压的扩展 → 选择项目根目录
+
+### Chrome 网上应用店包
+
+```bash
+npm run package
+```
+
+仅打包扩展本体（`manifest.json` + `dist/` + `icons/`），**不含** MCP / tools。  
+说明与上架文案见 [docs/chrome-web-store.md](docs/chrome-web-store.md)，隐私政策见 [docs/privacy.md](docs/privacy.md)。
 
 ## 项目结构
 

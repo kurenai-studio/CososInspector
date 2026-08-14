@@ -2,7 +2,6 @@
 
 declare const __INSPECTOR_VERSION__: string;
 
-import { AssetFloatingPanel } from './cocos3/assetPanel';
 import { log } from './cocos3/detect';
 import { installMcpBridge } from './cocos3/mcpBridge';
 import { startCocosInspector2 } from './cocos2/panel';
@@ -21,12 +20,6 @@ import {
   hashNodeInspectorData,
   renderNodeInspectorHtml,
 } from './cocos3/renderableInspector';
-import {
-  expandSuspectPaths,
-  type PerfScanMode,
-  type PerfScanReport,
-  runPerfScan,
-} from './cocos3/perfScan';
 import {
   copyRecoveredScript,
   downloadRecoveredScript,
@@ -54,7 +47,6 @@ import {
 import {
   countNodes,
   expandMatchingNodes,
-  maxPerfDc,
   renderTreeHtml,
 } from './cocos3/treeRender';
 
@@ -70,10 +62,6 @@ class CocosInspector3 {
   private statusEl: HTMLElement | null = null;
   private mainBody: HTMLElement | null = null;
   private mcpStatusEl: HTMLElement | null = null;
-  private scanBtn: HTMLButtonElement | null = null;
-  private scanModeSelect: HTMLSelectElement | null = null;
-  private clearScanBtn: HTMLButtonElement | null = null;
-  private assetBtn: HTMLButtonElement | null = null;
   private pauseBtn: HTMLButtonElement | null = null;
 
   private expandedScene = new Set<string>();
@@ -84,11 +72,6 @@ class CocosInspector3 {
   private inspectorHash = '';
   private spritePreviewToken = 0;
   private updateTimer: number | null = null;
-
-  private scanRunning = false;
-  private scanCancel = false;
-  private perfReport: PerfScanReport | null = null;
-  private assetPanel = new AssetFloatingPanel();
 
   constructor() {
     this.init();
@@ -102,7 +85,7 @@ class CocosInspector3 {
     this.startAutoRefresh();
     installMcpBridge();
     window.postMessage({ type: 'cocos-inspector-ready' }, '*');
-    log('已启动（全量场景树 + Inspector + DC 扫描 + 资源面板）');
+    log('已启动（全量场景树 + Inspector）');
   }
 
   private createUI(): void {
@@ -184,46 +167,6 @@ class CocosInspector3 {
     this.pauseBtn.addEventListener('click', () => this.toggleGamePause());
     controls.appendChild(this.pauseBtn);
 
-    this.scanModeSelect = document.createElement('select');
-    this.scanModeSelect.className = 'perf-scan-mode';
-    this.scanModeSelect.title = 'DC 扫描粒度';
-    [
-      ['quick', '快速'],
-      ['standard', '标准'],
-      ['fine', '精细'],
-    ].forEach(([value, label]) => {
-      const opt = document.createElement('option');
-      opt.value = value;
-      opt.textContent = label;
-      if (value === 'standard') opt.selected = true;
-      this.scanModeSelect!.appendChild(opt);
-    });
-    controls.appendChild(this.scanModeSelect);
-
-    this.scanBtn = document.createElement('button');
-    this.scanBtn.type = 'button';
-    this.scanBtn.className = 'perf-scan-btn';
-    this.scanBtn.textContent = '扫描 DC';
-    this.scanBtn.title = '逐个关闭子树测量 DrawCall 减少量，定位高 DC 节点';
-    this.scanBtn.addEventListener('click', () => void this.startPerfScan());
-    controls.appendChild(this.scanBtn);
-
-    this.clearScanBtn = document.createElement('button');
-    this.clearScanBtn.type = 'button';
-    this.clearScanBtn.className = 'perf-clear-btn';
-    this.clearScanBtn.textContent = '清除';
-    this.clearScanBtn.title = '清除 DC 扫描结果';
-    this.clearScanBtn.addEventListener('click', () => this.clearPerfScan());
-    controls.appendChild(this.clearScanBtn);
-
-    this.assetBtn = document.createElement('button');
-    this.assetBtn.type = 'button';
-    this.assetBtn.className = 'asset-panel-btn';
-    this.assetBtn.textContent = '资源';
-    this.assetBtn.title = '打开资源加载状态浮窗';
-    this.assetBtn.addEventListener('click', () => this.assetPanel.toggle());
-    controls.appendChild(this.assetBtn);
-
     this.searchInput = document.createElement('input');
     this.searchInput.type = 'search';
     this.searchInput.className = 'search-input';
@@ -262,75 +205,6 @@ class CocosInspector3 {
     this.panel.appendChild(this.mainBody);
     this.root.appendChild(this.panel);
     document.body.appendChild(this.root);
-  }
-
-  private setScanUiRunning(running: boolean): void {
-    if (this.scanBtn) {
-      this.scanBtn.disabled = running;
-      this.scanBtn.textContent = running ? '扫描中…' : '扫描 DC';
-    }
-    if (this.scanModeSelect) this.scanModeSelect.disabled = running;
-    if (this.clearScanBtn) this.clearScanBtn.disabled = running;
-  }
-
-  private clearPerfScan(): void {
-    if (this.scanRunning) return;
-    this.perfReport = null;
-    this.refreshAll(true);
-    this.setStatus('已清除 DC 扫描结果');
-  }
-
-  private async startPerfScan(): Promise<void> {
-    if (this.scanRunning) {
-      this.scanCancel = true;
-      return;
-    }
-
-    const scene = getSceneRoot();
-    if (!scene) {
-      this.setStatus('无法扫描：场景未就绪');
-      return;
-    }
-
-    const mode = (this.scanModeSelect?.value ?? 'standard') as PerfScanMode;
-    this.scanRunning = true;
-    this.scanCancel = false;
-    this.setScanUiRunning(true);
-    this.stopAutoRefresh();
-
-    const report = await runPerfScan(
-      mode,
-      (p) => {
-        if (p.phase === 'scanning' || p.phase === 'baseline') {
-          this.setStatus(
-            `${p.message} · ${p.testsDone}/${p.testsBudget}`
-          );
-        } else {
-          this.setStatus(p.message);
-        }
-      },
-      () => this.scanCancel
-    );
-
-    this.scanRunning = false;
-    this.scanCancel = false;
-    this.setScanUiRunning(false);
-    this.startAutoRefresh();
-
-    if (report) {
-      this.perfReport = report;
-      expandSuspectPaths(scene, report.dcByNodeId, this.expandedScene, 1);
-      const top = report.suspects[0];
-      if (top) {
-        this.selectedId = top.nodeId;
-        const unit = report.method === 'estimated' ? '渲染单元' : 'DC';
-        console.log(
-          `[DC扫描] Top ${top.nodeName}(${top.nodeId}) -${top.dcDrop} ${unit} · ${top.path}`
-        );
-      }
-    }
-
-    this.refreshAll(true);
   }
 
   private stopAutoRefresh(): void {
@@ -388,7 +262,6 @@ class CocosInspector3 {
       this.statusEl.textContent = '';
     }
     this.sceneTreeHash = '';
-    this.assetPanel.close();
     this.panel?.remove();
   }
 
@@ -399,9 +272,6 @@ class CocosInspector3 {
     this.root.classList.toggle('is-collapsed', collapsed);
 
     if (collapsed) {
-      if (this.scanRunning) {
-        this.scanCancel = true;
-      }
       this.stopAutoRefresh();
       this.detachPanel();
       log('面板已收起，停止渲染');
@@ -426,7 +296,7 @@ class CocosInspector3 {
   }
 
   private startAutoRefresh(): void {
-    if (this.isCollapsed || this.scanRunning) return;
+    if (this.isCollapsed) return;
     this.stopAutoRefresh();
     this.updateTimer = window.setInterval(
       () => this.refreshAll(false),
@@ -595,13 +465,7 @@ class CocosInspector3 {
     }
 
     const treeInfo = buildTreeInfo(scene);
-    const perfDc = this.perfReport?.dcByNodeId;
-    const perfHash = perfDc
-      ? [...perfDc.entries()].map(([k, v]) => `${k}:${Math.round(v)}`).join(',')
-      : '';
-    const nextSceneHash = `${hashTree(treeInfo)}|perf:${perfHash}|sel:${this.selectedId ?? ''}`;
-
-    const treeOnlyHash = `${hashTree(treeInfo)}|perf:${perfHash}`;
+    const treeOnlyHash = hashTree(treeInfo);
     const treeChanged = force || treeOnlyHash !== this.sceneTreeHash;
 
     if (treeChanged) {
@@ -612,7 +476,6 @@ class CocosInspector3 {
       }
 
       const sceneRootId = getNodeId(scene);
-      const perfDcMax = maxPerfDc(perfDc);
 
       if (this.sceneTreeContainer) {
         this.sceneTreeContainer.innerHTML = `<ul class="node-tree">${renderTreeHtml(
@@ -623,8 +486,6 @@ class CocosInspector3 {
             searchQuery: this.searchQuery,
             isRoot: true,
             sceneRootId,
-            perfDcByNodeId: perfDc,
-            perfDcMax,
           }
         )}</ul>`;
       }
@@ -634,26 +495,7 @@ class CocosInspector3 {
     this.syncPauseButton();
 
     const nodeCount = countNodes(treeInfo);
-    if (this.scanRunning) return;
-
     const pauseTag = getPauseState().paused ? ' · 已暂停' : '';
-
-    if (this.perfReport) {
-      const top = this.perfReport.suspects[0];
-      const unit = this.perfReport.method === 'estimated' ? '渲染单元' : 'DC';
-      const topText = top
-        ? ` · Top ${top.nodeName} -${Math.round(top.dcDrop)} ${unit}`
-        : '';
-      const baseline =
-        this.perfReport.method === 'measured'
-          ? `基准 ${Math.round(this.perfReport.baselineDc)} DC`
-          : '估算模式';
-      this.setStatus(
-        `场景树 · ${nodeCount} 节点 · ${baseline}${topText}${pauseTag}`
-      );
-      return;
-    }
-
     this.setStatus(
       `场景树 · ${nodeCount} 个节点 · ${scene.name || 'Scene'}${pauseTag}`
     );
