@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Cocos Inspector 3",
-  "version": "3.3.34",
+  "version": "3.3.35",
   "description": "在试玩页查看 Cocos Creator / Egret / PixiJS 场景节点树、组件与资源，辅助调试与导出。",
   "permissions": ["activeTab", "tabs", "storage"],
   "host_permissions": ["http://*/*", "https://*/*"],

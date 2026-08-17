@@ -3,9 +3,9 @@
  */
 import { isInspectorEventTarget } from '../engine/pickDownloadToolbar';
 import {
+  clientToWorld,
   hideNodeBoundsOverlay,
   showNodeBoundsOverlay,
-  worldRectToScreenCss,
 } from './nodeBoundsOverlay';
 import { getNodeId, getSceneRoot } from './sceneTree';
 
@@ -51,29 +51,26 @@ const isNodeVisible = (node: cc.Node): boolean => {
   return node.active !== false;
 };
 
-const getScreenRect = (
+const getWorldBox = (
   node: cc.Node
-): { left: number; top: number; width: number; height: number } | null => {
+): { x: number; y: number; width: number; height: number } | null => {
   const ui = getUiTransform(node);
   if (!ui?.getBoundingBoxToWorld) return null;
   try {
     const bbox = ui.getBoundingBoxToWorld();
     if (!bbox || bbox.width <= 0 || bbox.height <= 0) return null;
-    return worldRectToScreenCss(bbox);
+    return bbox;
   } catch {
     return null;
   }
 };
 
-const containsCss = (
-  css: { left: number; top: number; width: number; height: number },
+const containsWorld = (
+  box: { x: number; y: number; width: number; height: number },
   x: number,
   y: number
 ): boolean =>
-  x >= css.left &&
-  x <= css.left + css.width &&
-  y >= css.top &&
-  y <= css.top + css.height;
+  x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
 
 type Hit = { node: cc.Node; area: number; depth: number };
 
@@ -85,9 +82,9 @@ const collectHits = (
   hits: Hit[]
 ): void => {
   if (!isNodeVisible(node)) return;
-  const css = getScreenRect(node);
-  if (css && containsCss(css, x, y)) {
-    hits.push({ node, area: css.width * css.height, depth });
+  const box = getWorldBox(node);
+  if (box && containsWorld(box, x, y)) {
+    hits.push({ node, area: box.width * box.height, depth });
   }
   for (const child of node.children ?? []) {
     if (!child) continue;
@@ -97,9 +94,10 @@ const collectHits = (
 
 const hitTest = (clientX: number, clientY: number): cc.Node | null => {
   const scene = getSceneRoot();
-  if (!scene) return null;
+  const world = clientToWorld(clientX, clientY);
+  if (!scene || !world) return null;
   const hits: Hit[] = [];
-  collectHits(scene, clientX, clientY, 0, hits);
+  collectHits(scene, world.x, world.y, 0, hits);
   if (hits.length === 0) return null;
   hits.sort((a, b) => a.area - b.area || b.depth - a.depth);
   return hits[0].node;

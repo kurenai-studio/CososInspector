@@ -55,7 +55,9 @@
 - **刷新** / **暂停** / **拾取** / **下载** / 节点搜索 / **收起**
 - 「收起」固定在工具栏右侧，`flex-shrink: 0`，不再被裁切
 - **拾取**：十字光标 + capture 拦截点击；悬停画包围盒；点击选中并展开祖先
-  （Esc 取消）。3.x 用 `UITransform` 世界盒，2.x 用 `getBoundingBoxToWorld`
+  （Esc 取消）。3.x 用 UI 相机 `screenToWorld` + `UITransform` 世界盒
+  （v3.3.35 起不限节点名 `UICamera`，避免高分屏框缩到左半边）；
+  2.x 用 `getBoundingBoxToWorld`
 - **下载**（Chrome 目录选择，复用已有导出，不含龙骨/图集裁剪）：
   - 选中节点纹理 PNG
   - 选中节点子树 Sprite PNG
