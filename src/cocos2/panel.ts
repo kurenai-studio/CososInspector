@@ -4,6 +4,12 @@ import {
   syncMcpGuideClickable,
 } from '../engine/mcpInstallGuide';
 import {
+  COCOS_DOWNLOAD_ITEMS,
+  createPickDownloadDom,
+  fillDownloadMenu,
+  placeDownloadMenu,
+} from '../engine/pickDownloadToolbar';
+import {
   countNodes,
   expandMatchingNodes,
   renderTreeHtml,
@@ -16,14 +22,21 @@ import {
   renderNodeInspectorHtml,
 } from './nodeInspector';
 import {
+  isPickModeActive,
+  startPickMode,
+  stopPickMode,
+} from './nodePicker';
+import {
   buildTreeInfo,
   findNodeById,
   getNodeId,
   getNodeName,
+  getPathToNode,
   getSceneRoot,
   hashTree,
   setNodeActive,
 } from './sceneTree';
+import { runCocos2Download } from './toolbarDownload';
 import {
   downloadExtractPng,
   extractSpriteFrame,
@@ -47,12 +60,17 @@ export class CocosInspector2 {
   private searchInput: HTMLInputElement | null = null;
   private statusEl: HTMLElement | null = null;
   private pauseBtn: HTMLButtonElement | null = null;
+  private pickBtn: HTMLButtonElement | null = null;
+  private downloadBtn: HTMLButtonElement | null = null;
+  private downloadMenu: HTMLDivElement | null = null;
   private mcpStatusEl: HTMLElement | null = null;
 
   private expandedScene = new Set<string>();
   private selectedId: string | null = null;
   private searchQuery = '';
   private isCollapsed = false;
+  private isPickMode = false;
+  private isDownloading = false;
   private sceneTreeHash = '';
   private inspectorHash = '';
   private updateTimer: number | null = null;
@@ -153,6 +171,29 @@ export class CocosInspector2 {
     this.pauseBtn.addEventListener('click', () => this.toggleGamePause());
     controls.appendChild(this.pauseBtn);
 
+    const pickDl = createPickDownloadDom();
+    this.pickBtn = pickDl.pickBtn;
+    this.downloadBtn = pickDl.downloadBtn;
+    this.downloadMenu = pickDl.downloadMenu;
+    this.pickBtn.addEventListener('click', () => this.togglePickMode());
+    this.downloadBtn.addEventListener('click', () => this.toggleDownloadMenu());
+    fillDownloadMenu(this.downloadMenu, COCOS_DOWNLOAD_ITEMS, (key) => {
+      this.onDownload(key).catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        this.setStatus(`下载失败: ${msg}`);
+      });
+    });
+    document.body.appendChild(this.downloadMenu);
+    document.addEventListener('click', (ev) => {
+      if (this.isCollapsed) return;
+      const target = ev.target as Node;
+      if (this.downloadMenu?.contains(target)) return;
+      if (this.downloadBtn === target) return;
+      this.hideDownloadMenu();
+    });
+    controls.appendChild(this.pickBtn);
+    controls.appendChild(this.downloadBtn);
+
     this.searchInput = document.createElement('input');
     this.searchInput.type = 'search';
     this.searchInput.className = 'search-input';
@@ -222,6 +263,8 @@ export class CocosInspector2 {
     this.root.classList.toggle('is-collapsed', collapsed);
 
     if (collapsed) {
+      this.stopPickModeInternal();
+      this.hideDownloadMenu();
       this.stopAutoRefresh();
       this.sceneTreeContainer && (this.sceneTreeContainer.innerHTML = '');
       this.panel?.remove();
@@ -475,6 +518,83 @@ export class CocosInspector2 {
     const paused = getPauseState().paused;
     this.pauseBtn.textContent = paused ? '继续' : '暂停';
     this.pauseBtn.classList.toggle('pause-btn--active', paused);
+  }
+
+  private togglePickMode(): void {
+    if (this.isPickMode) this.stopPickModeInternal();
+    else this.startPickModeInternal();
+  }
+
+  private startPickModeInternal(): void {
+    if (this.isPickMode) return;
+    this.hideDownloadMenu();
+    this.isPickMode = true;
+    this.pickBtn?.classList.add('pick-btn--active');
+    if (this.pickBtn) this.pickBtn.textContent = '取消拾取';
+    this.setStatus('拾取中：点击画面节点，Esc 取消');
+    if (!isPickModeActive()) {
+      startPickMode((nodeId) => this.onNodePicked(nodeId));
+    }
+  }
+
+  private stopPickModeInternal(): void {
+    if (!this.isPickMode) return;
+    this.isPickMode = false;
+    this.pickBtn?.classList.remove('pick-btn--active');
+    if (this.pickBtn) this.pickBtn.textContent = '拾取';
+    stopPickMode();
+  }
+
+  private onNodePicked(nodeId: string): void {
+    this.selectedId = nodeId;
+    const scene = getSceneRoot();
+    if (scene) {
+      const path = getPathToNode(scene, nodeId);
+      if (path) {
+        for (const id of path) this.expandedScene.add(id);
+      }
+    }
+    this.stopPickModeInternal();
+    this.refreshAll(true);
+    requestAnimationFrame(() => this.scrollSelectedIntoView());
+  }
+
+  private scrollSelectedIntoView(): void {
+    const sel = this.sceneTreeContainer?.querySelector(
+      'li.selected'
+    ) as HTMLElement | null;
+    sel?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
+  private toggleDownloadMenu(): void {
+    if (!this.downloadMenu || !this.downloadBtn) return;
+    const open = this.downloadMenu.style.display !== 'none';
+    if (open) {
+      this.hideDownloadMenu();
+      return;
+    }
+    placeDownloadMenu(this.downloadMenu, this.downloadBtn);
+  }
+
+  private hideDownloadMenu(): void {
+    if (this.downloadMenu) this.downloadMenu.style.display = 'none';
+  }
+
+  private async onDownload(key: string): Promise<void> {
+    this.hideDownloadMenu();
+    if (this.isDownloading) return;
+    this.isDownloading = true;
+    if (this.downloadBtn) this.downloadBtn.disabled = true;
+    try {
+      await runCocos2Download(key, this.selectedId, (s) => this.setStatus(s));
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.setStatus(`下载失败: ${msg}`);
+      console.error('[下载:2.x]', error);
+    } finally {
+      this.isDownloading = false;
+      if (this.downloadBtn) this.downloadBtn.disabled = false;
+    }
   }
 
   private setStatus(text: string): void {

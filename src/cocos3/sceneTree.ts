@@ -23,6 +23,29 @@ export function findNodeById(root: cc.Node, id: string): cc.Node | null {
   return null;
 }
 
+/** 从 root 到 targetId 的节点 id 路径（含目标，不含 root），用于自动展开 */
+export function getPathToNode(root: cc.Node, targetId: string): string[] | null {
+  if (getNodeId(root) === targetId) return [];
+  const path: string[] = [];
+  const walk = (node: cc.Node): boolean => {
+    if (getNodeId(node) === targetId) return true;
+    for (const child of node.children ?? []) {
+      if (!child) continue;
+      path.push(getNodeId(child));
+      if (walk(child)) return true;
+      path.pop();
+    }
+    return false;
+  };
+  for (const child of root.children ?? []) {
+    if (!child) continue;
+    path.push(getNodeId(child));
+    if (walk(child)) return path;
+    path.pop();
+  }
+  return null;
+}
+
 /** 从场景根到目标节点的名称路径，如 Canvas › UI › btn */
 export function buildNodePath(root: cc.Node, targetId: string): string {
   const names: string[] = [];
