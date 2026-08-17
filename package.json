@@ -1,6 +1,6 @@
 {
   "name": "cocosinspector",
-  "version": "3.3.35",
+  "version": "3.3.36",
   "description": "Cocos Creator 3.x / 2.x / Egret / PixiJS 节点树查看器 Chrome 扩展",
   "main": "dist/content.js",
   "scripts": {

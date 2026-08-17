@@ -1,7 +1,8 @@
 /**
- * Cocos 3.x 鼠标拾取：capture 拦截点击，世界盒 → 屏幕命中最深/最小节点
+ * Cocos 3.x 鼠标拾取：2D UI 世界盒 + 3D Mesh 射线 AABB
  */
 import { isInspectorEventTarget } from '../engine/pickDownloadToolbar';
+import { pickMeshNode } from './nodeBounds3d';
 import {
   clientToWorld,
   hideNodeBoundsOverlay,
@@ -94,13 +95,25 @@ const collectHits = (
 
 const hitTest = (clientX: number, clientY: number): cc.Node | null => {
   const scene = getSceneRoot();
+  if (!scene) return null;
+
   const world = clientToWorld(clientX, clientY);
-  if (!scene || !world) return null;
-  const hits: Hit[] = [];
-  collectHits(scene, world.x, world.y, 0, hits);
-  if (hits.length === 0) return null;
-  hits.sort((a, b) => a.area - b.area || b.depth - a.depth);
-  return hits[0].node;
+  const uiHits: Hit[] = [];
+  if (world) collectHits(scene, world.x, world.y, 0, uiHits);
+
+  const meshHit = pickMeshNode(scene, clientX, clientY);
+
+  // 小块 UI（按钮等）优先；整屏 Canvas 让给 3D 射线
+  const maxUi = uiHits.reduce((m, h) => Math.max(m, h.area), 0);
+  const smallUi = uiHits.filter((h) => maxUi > 0 && h.area < maxUi * 0.5);
+  if (smallUi.length > 0) {
+    smallUi.sort((a, b) => a.area - b.area || b.depth - a.depth);
+    return smallUi[0].node;
+  }
+  if (meshHit) return meshHit.node;
+  if (uiHits.length === 0) return null;
+  uiHits.sort((a, b) => a.area - b.area || b.depth - a.depth);
+  return uiHits[0].node;
 };
 
 const onMouseMove = (ev: MouseEvent): void => {

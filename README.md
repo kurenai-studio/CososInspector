@@ -12,7 +12,7 @@
 ### 核心（main）
 
 - 场景节点树、Inspector 组件面板（含 **Node 位置**、扩展 **版本号**）
-- 工具栏 **暂停/继续**（`director.pause`），**拾取**画面节点，**下载**纹理/Spine/BMFont
+- 工具栏 **暂停/继续**、**拾取**（3.x 含 3D Mesh AABB）、**下载**纹理/Spine/BMFont
 - MCP：`cocos_export_scene_snapshot`、`cocos_download_texture`、`scene-to-creator` 等
 - Spine / BMFont 内存导出（Cocos 3.x）、DragonBones / Spine 内存导出（Egret）
 - 与 Creator **cocos-meta-mcp** 配合复刻试玩场景（见下方 Skill）

@@ -1,3 +1,4 @@
+import { collectMeshOverlay, type OverlayEdge } from './nodeBounds3d';
 import { findNodeById, getNodeId, getSceneRoot } from './sceneTree';
 
 export interface BoundsOverlayBox {
@@ -13,6 +14,7 @@ export interface NodeBoundsOverlayState {
   nodeId: string;
   nodeName: string;
   boxes: BoundsOverlayBox[];
+  edges?: OverlayEdge[];
 }
 
 let overlayRoot: HTMLDivElement | null = null;
@@ -317,10 +319,16 @@ const readVec2 = (v?: { x?: number; y?: number } | null) => ({
   y: v?.y ?? 0,
 });
 
-const collectOverlayBoxes = (node: cc.Node): BoundsOverlayBox[] => {
+const collectOverlayVisuals = (
+  node: cc.Node
+): { boxes: BoundsOverlayBox[]; edges: OverlayEdge[] } => {
   const boxes: BoundsOverlayBox[] = [];
+  const mesh = collectMeshOverlay(node);
+  boxes.push(...mesh.boxes);
   const ui = getUiTransform(node);
-  if (!ui?.getBoundingBoxToWorld) return boxes;
+  if (!ui?.getBoundingBoxToWorld) {
+    return { boxes, edges: mesh.edges };
+  }
 
   const uiBbox = ui.getBoundingBoxToWorld();
   const uiCss = worldRectToScreenCss(uiBbox);
@@ -334,13 +342,17 @@ const collectOverlayBoxes = (node: cc.Node): BoundsOverlayBox[] => {
     });
   }
 
-  if (!showFrameInner || !ui.convertToWorldSpaceAR) return boxes;
+  if (!showFrameInner || !ui.convertToWorldSpaceAR) {
+    return { boxes, edges: mesh.edges };
+  }
 
   const sp = getSprite(node);
   const frame = sp?.spriteFrame;
   const rect = frame?.rect;
   const os = frame?.originalSize;
-  if (!rect?.width || !rect?.height || !os) return boxes;
+  if (!rect?.width || !rect?.height || !os) {
+    return { boxes, edges: mesh.edges };
+  }
 
   const ow = Math.round(os.width ?? (os as { x?: number }).x ?? cw);
   const oh = Math.round(os.height ?? (os as { y?: number }).y ?? ch);
@@ -378,7 +390,7 @@ const collectOverlayBoxes = (node: cc.Node): BoundsOverlayBox[] => {
     });
   }
 
-  return boxes;
+  return { boxes, edges: mesh.edges };
 };
 
 const ensureOverlayRoot = (): HTMLDivElement => {
@@ -396,10 +408,57 @@ const ensureOverlayRoot = (): HTMLDivElement => {
   return overlayRoot;
 };
 
+const renderEdges = (
+  root: HTMLElement,
+  edges: OverlayEdge[],
+  nodeName: string
+): void => {
+  if (edges.length === 0) return;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', '100%');
+  svg.style.cssText = [
+    'position:fixed',
+    'inset:0',
+    'pointer-events:none',
+    'overflow:visible',
+  ].join(';');
+  for (const e of edges) {
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', String(e.x1));
+    line.setAttribute('y1', String(e.y1));
+    line.setAttribute('x2', String(e.x2));
+    line.setAttribute('y2', String(e.y2));
+    line.setAttribute('stroke', e.color);
+    line.setAttribute('stroke-width', '2');
+    svg.appendChild(line);
+    if (e.label) {
+      const tag = document.createElement('div');
+      tag.textContent = `${nodeName} · ${e.label}`;
+      tag.style.cssText = [
+        'position:fixed',
+        `left:${e.x1}px`,
+        `top:${e.y1 - 18}px`,
+        `color:${e.color}`,
+        'font:12px/1.2 monospace',
+        'white-space:nowrap',
+        'text-shadow:0 0 4px #000',
+        'background:rgba(0,0,0,0.55)',
+        'padding:1px 4px',
+        'pointer-events:none',
+      ].join(';');
+      root.appendChild(tag);
+    }
+  }
+  root.appendChild(svg);
+};
+
 const renderBoxes = (state: NodeBoundsOverlayState | null): void => {
   const root = ensureOverlayRoot();
   root.replaceChildren();
-  if (!state?.boxes.length) return;
+  if (!state) return;
+  if (state.edges?.length) renderEdges(root, state.edges, state.nodeName);
+  if (!state.boxes.length) return;
 
   for (const box of state.boxes) {
     const el = document.createElement('div');
@@ -461,8 +520,8 @@ const tick = (): void => {
 
   const nodeId = getNodeId(node);
   const nodeName = node.name || '(unnamed)';
-  const boxes = collectOverlayBoxes(node);
-  renderBoxes({ nodeId, nodeName, boxes });
+  const visuals = collectOverlayVisuals(node);
+  renderBoxes({ nodeId, nodeName, ...visuals });
   rafId = requestAnimationFrame(tick);
 };
 
@@ -485,7 +544,7 @@ export const showNodeBoundsOverlay = (
   renderBoxes({
     nodeId,
     nodeName: node.name || '(unnamed)',
-    boxes: collectOverlayBoxes(node),
+    ...collectOverlayVisuals(node),
   });
   scheduleTick();
   return { ok: true, nodeId, nodeName: node.name || '(unnamed)' };
@@ -504,7 +563,7 @@ export const showNodeBoundsByPath = (
   renderBoxes({
     nodeId: getNodeId(node),
     nodeName: node.name || '(unnamed)',
-    boxes: collectOverlayBoxes(node),
+    ...collectOverlayVisuals(node),
   });
   scheduleTick();
   return {
@@ -548,7 +607,7 @@ export const debugNodeBoundsByPath = (
     ok: true,
     nodeId: getNodeId(node),
     nodeName: node.name || '(unnamed)',
-    boxes: collectOverlayBoxes(node),
+    ...collectOverlayVisuals(node),
     canvasRect: canvas?.getBoundingClientRect() ?? null,
   };
 };
