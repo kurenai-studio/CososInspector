@@ -122,4 +122,19 @@ node tools/verify-egret-cdp.mjs https://qp.bydrqp.com/bkby/platform/1020/index.h
 
 > bydrqp 捕鱼游戏加载界面尚未实例化 ArmatureDisplay 时，`listDragonBones` 返回空数组；资源清单已识别 `.dbbin`/`_tex.json`，可通过 `downloadResource` 拿到原始字节（验证实测：38812B 骨架 + 1871B 图集）。主场景特效加载后会通过同一通道自动导出。
 
+## Restored 便携浏览包
+
+CDN 线索还原后的资源可用本地 Viewer 浏览，并可打成独立 zip：
+
+```bash
+# 仓库内浏览（默认读 tmp/egret-cdn-clues/qp.bydrqp.com/restored）
+node tools/egret-restored-viewer.mjs
+
+# 打包资源 + Explorer → tmp/egret-restored-pack/ 与 .zip
+npm run pack-egret-restored
+# 或：node tools/pack-egret-restored-viewer.mjs [restoredDir] [outDir]
+```
+
+解压 zip 后运行 `start.bat` / `node start.mjs`，打开 http://127.0.0.1:19528/ 。包内含离线 `vendor/`（Pixi + DragonBones），无需外网 CDN。
+
 参考插件（已逆向）：`hgjkfcojmobceiihkjifeioioffcmond` 1.0.19 的 `inspector.js` 中 `le()` / `ce()` / `de()` 提供了纹理→整图回退思路。

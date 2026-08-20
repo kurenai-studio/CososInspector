@@ -21,8 +21,9 @@ const EDGE =
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 const PORT = 9222;
 const USER_DATA_DIR = join(tmpdir(), 'cocos-inspector-egret-verify');
-const EXT_PATH = 'D:/self_project/CososInspector';
-const OUT_SHOT = 'D:/work/egret-verify-shot.png';
+const EXT_PATH = process.env.COCOS_EXT_PATH || 'D:/UGit/CososInspectorNew';
+const OUT_SHOT =
+  process.env.COCOS_EGRET_SHOT || join(tmpdir(), 'egret-verify-shot.png');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

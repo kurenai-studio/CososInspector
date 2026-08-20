@@ -1,8 +1,13 @@
 import { logEngine } from '../engine/detect';
+import { appendBugFeedbackButton } from '../engine/bugFeedback';
 import {
   bindMcpInstallGuide,
   syncMcpGuideClickable,
 } from '../engine/mcpInstallGuide';
+import {
+  notePanelCollapsed,
+  startViewportWatch,
+} from '../engine/viewportWatch';
 import {
   COCOS_DOWNLOAD_ITEMS,
   createPickDownloadDom,
@@ -88,6 +93,7 @@ export class CocosInspector2 {
     installMcpBridge();
     this.refreshAll(true);
     this.startAutoRefresh();
+    startViewportWatch('cocos2');
     window.postMessage({ type: 'cocos-inspector-ready', engineFamily: '2' }, '*');
     logEngine('已启动 2.x 面板（含 Spine/BMFont 导出）');
   }
@@ -204,6 +210,8 @@ export class CocosInspector2 {
     });
     controls.appendChild(this.searchInput);
 
+    appendBugFeedbackButton(controls, this.panel);
+
     const toggleBtn = document.createElement('button');
     toggleBtn.type = 'button';
     toggleBtn.className = 'header-toggle-btn';
@@ -261,6 +269,7 @@ export class CocosInspector2 {
     if (!this.root || this.isCollapsed === collapsed) return;
     this.isCollapsed = collapsed;
     this.root.classList.toggle('is-collapsed', collapsed);
+    notePanelCollapsed(collapsed);
 
     if (collapsed) {
       this.stopPickModeInternal();

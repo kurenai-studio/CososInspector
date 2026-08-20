@@ -2,11 +2,16 @@
  * PixiJS Inspector 面板（MVP）：stage 树 + 暂停 + MCP
  */
 import { logEngine } from '../engine/detect';
+import { appendBugFeedbackButton } from '../engine/bugFeedback';
 import { mountInspectorRoot } from '../engine/mount';
 import {
   bindMcpInstallGuide,
   syncMcpGuideClickable,
 } from '../engine/mcpInstallGuide';
+import {
+  notePanelCollapsed,
+  startViewportWatch,
+} from '../engine/viewportWatch';
 import {
   countNodes,
   expandMatchingNodes,
@@ -59,6 +64,7 @@ export class PixiInspector {
       installMcpBridge();
       this.refreshAll(true);
       this.startAutoRefresh();
+      startViewportWatch('pixi');
       window.postMessage(
         { type: 'cocos-inspector-ready', engineFamily: 'pixi' },
         '*'
@@ -158,6 +164,8 @@ export class PixiInspector {
     });
     controls.appendChild(this.searchInput);
 
+    appendBugFeedbackButton(controls, this.panel);
+
     const toggleBtn = document.createElement('button');
     toggleBtn.type = 'button';
     toggleBtn.className = 'header-toggle-btn';
@@ -219,6 +227,7 @@ export class PixiInspector {
     if (!this.root || this.isCollapsed === collapsed) return;
     this.isCollapsed = collapsed;
     this.root.classList.toggle('is-collapsed', collapsed);
+    notePanelCollapsed(collapsed);
 
     if (collapsed) {
       this.stopAutoRefresh();

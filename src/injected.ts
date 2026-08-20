@@ -11,10 +11,15 @@ import {
   waitForEngine,
 } from './engine/detect';
 import { whenDomReady } from './engine/mount';
+import { appendBugFeedbackButton } from './engine/bugFeedback';
 import {
   bindMcpInstallGuide,
   syncMcpGuideClickable,
 } from './engine/mcpInstallGuide';
+import {
+  notePanelCollapsed,
+  startViewportWatch,
+} from './engine/viewportWatch';
 import {
   COCOS_DOWNLOAD_ITEMS,
   createPickDownloadDom,
@@ -106,6 +111,7 @@ class CocosInspector3 {
     this.refreshAll(true);
     this.startAutoRefresh();
     installMcpBridge();
+    startViewportWatch('cocos3');
     window.postMessage({ type: 'cocos-inspector-ready' }, '*');
     log('已启动（全量场景树 + Inspector）');
   }
@@ -223,6 +229,8 @@ class CocosInspector3 {
     });
     controls.appendChild(this.searchInput);
 
+    appendBugFeedbackButton(controls, this.panel);
+
     const toggleBtn = document.createElement('button');
     toggleBtn.type = 'button';
     toggleBtn.className = 'header-toggle-btn';
@@ -320,6 +328,7 @@ class CocosInspector3 {
 
     this.isCollapsed = collapsed;
     this.root.classList.toggle('is-collapsed', collapsed);
+    notePanelCollapsed(collapsed);
 
     if (collapsed) {
       this.stopPickModeInternal();

@@ -3,11 +3,16 @@
  * 结构与 pixi/panel.ts 对齐：挂 documentElement、hash 比对、收起即停轮询
  */
 import { logEngine } from '../engine/detect';
+import { appendBugFeedbackButton } from '../engine/bugFeedback';
 import { mountInspectorRoot } from '../engine/mount';
 import {
   bindMcpInstallGuide,
   syncMcpGuideClickable,
 } from '../engine/mcpInstallGuide';
+import {
+  notePanelCollapsed,
+  startViewportWatch,
+} from '../engine/viewportWatch';
 import {
   countNodes,
   expandMatchingNodes,
@@ -76,6 +81,7 @@ export class EgretInspector {
       installMcpBridge();
       this.refreshAll(true);
       this.startAutoRefresh();
+      startViewportWatch('egret');
       window.postMessage(
         { type: 'cocos-inspector-ready', engineFamily: 'egret' },
         '*'
@@ -174,6 +180,8 @@ export class EgretInspector {
       this.refreshAll(true);
     });
     controls.appendChild(this.searchInput);
+
+    appendBugFeedbackButton(controls, this.panel);
 
     const toggleBtn = document.createElement('button');
     toggleBtn.type = 'button';
@@ -829,6 +837,7 @@ export class EgretInspector {
     if (!this.root || this.isCollapsed === collapsed) return;
     this.isCollapsed = collapsed;
     this.root.classList.toggle('is-collapsed', collapsed);
+    notePanelCollapsed(collapsed);
 
     if (collapsed) {
       this.stopAutoRefresh();

@@ -1,6 +1,6 @@
 {
   "name": "cocosinspector",
-  "version": "3.3.36",
+  "version": "3.3.37",
   "description": "Cocos Creator 3.x / 2.x / Egret / PixiJS 节点树查看器 Chrome 扩展",
   "main": "dist/content.js",
   "scripts": {
@@ -25,7 +25,8 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "prebuild": "npm run clean",
     "package": "node scripts/package-extension.mjs",
-    "package:store": "node scripts/package-extension.mjs"
+    "package:store": "node scripts/package-extension.mjs",
+    "pack-egret-restored": "node tools/pack-egret-restored-viewer.mjs"
   },
   "keywords": [
     "cocos",

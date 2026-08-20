@@ -1521,3 +1521,102 @@ li.selected > .node-tree-item {
 .sprite-download-btn-2x:hover {
   border-color: rgba(120, 200, 160, 0.5);
 }
+
+/* 反馈 BUG（仅诊断日志） */
+.insp-bug-feedback-btn {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 180, 80, 0.35);
+  background: rgba(90, 60, 20, 0.75);
+  color: #ffe0b2;
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.insp-bug-feedback-btn:hover {
+  border-color: rgba(255, 200, 120, 0.55);
+  color: #fff;
+}
+
+.insp-bug-feedback {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 64px;
+  z-index: 40;
+  padding: 10px 12px;
+  background: rgba(22, 24, 28, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  max-height: calc(100vh - 96px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.insp-bug-feedback-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.insp-bug-feedback-lead {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.insp-bug-feedback-note {
+  width: 100%;
+  resize: vertical;
+  min-height: 64px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 12px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.insp-bug-feedback-preview {
+  margin: 0;
+  padding: 8px;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 10px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(200, 220, 200, 0.9);
+}
+
+.insp-bug-feedback-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.insp-bug-feedback-download,
+.insp-bug-feedback-copy,
+.insp-bug-feedback-close {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(68, 68, 68, 0.75);
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.insp-bug-feedback-download {
+  background: rgba(46, 90, 60, 0.85);
+  border-color: rgba(120, 200, 160, 0.35);
+}
