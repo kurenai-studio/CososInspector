@@ -1,3 +1,4 @@
+import { collectMeshOverlay, type OverlayEdge } from './nodeBounds3d';
 import { findNodeById, getNodeId, getSceneRoot } from './sceneTree';
 
 export interface BoundsOverlayBox {
@@ -13,6 +14,7 @@ export interface NodeBoundsOverlayState {
   nodeId: string;
   nodeName: string;
   boxes: BoundsOverlayBox[];
+  edges?: OverlayEdge[];
 }
 
 let overlayRoot: HTMLDivElement | null = null;
@@ -58,29 +60,111 @@ export const findNodeByPathSuffix = (suffix: string): cc.Node | null => {
   return walk(scene, [scene.name || 'main']);
 };
 
-/** 查找 UICamera（UI 世界坐标 → 屏幕） */
-const findUICamera = (): {
-  worldToScreen: (pos: { x: number; y: number; z?: number }, out?: { x: number; y: number; z: number }) => { x: number; y: number; z: number };
-} | null => {
+type CamLike = {
+  worldToScreen?: (
+    pos: { x: number; y: number; z?: number },
+    out?: { x: number; y: number; z: number }
+  ) => { x: number; y: number; z: number };
+  screenToWorld?: (
+    pos: { x: number; y: number; z?: number },
+    out?: { x: number; y: number; z: number }
+  ) => { x: number; y: number; z: number };
+  camera?: { window?: { width?: number; height?: number } };
+  _camera?: { window?: { width?: number; height?: number } };
+  projection?: number;
+  _projection?: number;
+};
+
+const isCameraClass = (cn: string): boolean =>
+  cn === 'cc.Camera' || cn === 'Camera';
+
+const getCameraOnNode = (node: cc.Node): CamLike | null => {
+  const Camera = (window.cc as { Camera?: unknown }).Camera;
+  if (Camera && typeof node.getComponent === 'function') {
+    try {
+      const hit = node.getComponent(Camera as never);
+      if (hit) return hit as CamLike;
+    } catch {
+      /* 试玩页可能无 cc.Camera 导出 */
+    }
+  }
+  const comps =
+    (node as cc.Node & { _components?: unknown[] })._components ?? [];
+  return (
+    (comps.find((c) => {
+      const rec = c as {
+        __classname__?: string;
+        constructor?: { name?: string };
+      };
+      const cn = rec.__classname__ ?? rec.constructor?.name ?? '';
+      return isCameraClass(cn);
+    }) as CamLike | undefined) ?? null
+  );
+};
+
+const scoreCamera = (node: cc.Node, cam: CamLike): number => {
+  let score = 1;
+  const name = (node.name || '').toLowerCase();
+  const parent = (node.parent?.name || '').toLowerCase();
+  if (name === 'uicamera') score += 100;
+  if (name.includes('ui') && name.includes('camera')) score += 40;
+  if (name === 'canvas' || parent === 'canvas') score += 50;
+  const proj = cam.projection ?? cam._projection;
+  if (proj === 0) score += 20;
+  return score;
+};
+
+/** 查找 UI 相机：3.8 常挂在 Canvas 上，不限节点名 UICamera */
+const findUICamera = (): CamLike | null => {
   const scene = getSceneRoot();
   if (!scene) return null;
-  const Camera = (window.cc as { Camera?: unknown }).Camera;
-  if (!Camera) return null;
-
-  const walk = (node: cc.Node): unknown => {
-    if (typeof node.getComponent !== 'function') return null;
-    if (node.name === 'UICamera') {
-      const cam = node.getComponent(Camera as never);
-      if (cam) return cam;
-    }
+  const found: { cam: CamLike; score: number }[] = [];
+  const walk = (node: cc.Node): void => {
+    const cam = getCameraOnNode(node);
+    if (cam) found.push({ cam, score: scoreCamera(node, cam) });
     for (const child of node.children ?? []) {
-      const hit = walk(child);
-      if (hit) return hit;
+      if (child) walk(child);
     }
-    return null;
   };
-  return walk(scene) as ReturnType<typeof findUICamera>;
+  walk(scene);
+  found.sort((a, b) => b.score - a.score);
+  if (found[0]) return found[0].cam;
+
+  const main = (
+    window.cc as { Camera?: { main?: CamLike; mainCamera?: CamLike } }
+  ).Camera;
+  return main?.main ?? main?.mainCamera ?? null;
 };
+
+const getCameraWindowSize = (cam: CamLike): { w: number; h: number } => {
+  const win = cam.camera?.window ?? cam._camera?.window;
+  const w = Number(win?.width ?? 0);
+  const h = Number(win?.height ?? 0);
+  if (w > 1 && h > 1) return { w, h };
+  const vs = (
+    window.cc as {
+      view?: {
+        getVisibleSizeInPixel?: () => { width: number; height: number };
+      };
+    }
+  ).view?.getVisibleSizeInPixel?.();
+  if (vs && vs.width > 1 && vs.height > 1) {
+    return { w: vs.width, h: vs.height };
+  }
+  const canvas = getGameCanvas();
+  return { w: canvas?.width || 1, h: canvas?.height || 1 };
+};
+
+const getVec3Ctor = (): (new (
+  x?: number,
+  y?: number,
+  z?: number
+) => { x: number; y: number; z: number }) | null =>
+  ((window.cc as Record<string, unknown>).Vec3 as new (
+    x?: number,
+    y?: number,
+    z?: number
+  ) => { x: number; y: number; z: number }) ?? null;
 
 const worldPointToClient = (
   x: number,
@@ -90,38 +174,69 @@ const worldPointToClient = (
   const canvas = getGameCanvas();
   if (!canvas) return null;
   const cr = canvas.getBoundingClientRect();
-  const ccg = window.cc as Record<string, unknown>;
-  const Vec3 = ccg.Vec3 as new (x?: number, y?: number, z?: number) => {
-    x: number;
-    y: number;
-    z: number;
-  };
+  if (cr.width <= 0 || cr.height <= 0) return null;
 
+  const Vec3 = getVec3Ctor();
   const cam = findUICamera();
   if (cam?.worldToScreen && Vec3) {
-    const wp = new Vec3(x, y, z);
     const out = new Vec3();
-    cam.worldToScreen(wp, out);
-    const sx = cr.width / canvas.width;
-    const sy = cr.height / canvas.height;
+    cam.worldToScreen(new Vec3(x, y, z), out);
+    const win = getCameraWindowSize(cam);
+    // window 像素、原点左下 → 按 window 归一化到 CSS，避免再乘 DPR
     return {
-      x: cr.left + out.x * sx,
-      y: cr.top + (canvas.height - out.y) * sy,
+      x: cr.left + (out.x / win.w) * cr.width,
+      y: cr.top + (1 - out.y / win.h) * cr.height,
     };
   }
 
-  const view = ccg.view as {
-    getScaleX?: () => number;
-    getScaleY?: () => number;
-  };
-  const scaleX = view?.getScaleX?.() ?? 1;
-  const scaleY = view?.getScaleY?.() ?? 1;
-  const sx = cr.width / canvas.width;
-  const sy = cr.height / canvas.height;
+  const vs = (
+    window.cc as {
+      view?: { getVisibleSize?: () => { width: number; height: number } };
+    }
+  ).view?.getVisibleSize?.();
+  if (vs && vs.width > 0 && vs.height > 0) {
+    return {
+      x: cr.left + (x / vs.width) * cr.width,
+      y: cr.top + (1 - y / vs.height) * cr.height,
+    };
+  }
   return {
-    x: cr.left + x * scaleX * sx,
-    y: cr.top + (canvas.height - y) * scaleY * sy,
+    x: cr.left + (x / canvas.width) * cr.width,
+    y: cr.top + (1 - y / canvas.height) * cr.height,
   };
+};
+
+/** 页面坐标 → UI 世界坐标（拾取用） */
+export const clientToWorld = (
+  clientX: number,
+  clientY: number
+): { x: number; y: number; z: number } | null => {
+  const canvas = getGameCanvas();
+  if (!canvas) return null;
+  const cr = canvas.getBoundingClientRect();
+  if (cr.width <= 0 || cr.height <= 0) return null;
+
+  const u = (clientX - cr.left) / cr.width;
+  const v = (clientY - cr.top) / cr.height;
+  const Vec3 = getVec3Ctor();
+  const cam = findUICamera();
+  if (cam?.screenToWorld && Vec3) {
+    const win = getCameraWindowSize(cam);
+    const screen = new Vec3(u * win.w, (1 - v) * win.h, 0);
+    const out = new Vec3();
+    cam.screenToWorld(screen, out);
+    return { x: out.x, y: out.y, z: out.z };
+  }
+
+  const vs = (
+    window.cc as {
+      view?: { getVisibleSize?: () => { width: number; height: number } };
+    }
+  ).view?.getVisibleSize?.();
+  if (vs && vs.width > 0 && vs.height > 0) {
+    return { x: u * vs.width, y: (1 - v) * vs.height, z: 0 };
+  }
+  return { x: u * canvas.width, y: (1 - v) * canvas.height, z: 0 };
 };
 
 /** UITransform 世界包围盒 → 页面 CSS 像素 */
@@ -204,10 +319,16 @@ const readVec2 = (v?: { x?: number; y?: number } | null) => ({
   y: v?.y ?? 0,
 });
 
-const collectOverlayBoxes = (node: cc.Node): BoundsOverlayBox[] => {
+const collectOverlayVisuals = (
+  node: cc.Node
+): { boxes: BoundsOverlayBox[]; edges: OverlayEdge[] } => {
   const boxes: BoundsOverlayBox[] = [];
+  const mesh = collectMeshOverlay(node);
+  boxes.push(...mesh.boxes);
   const ui = getUiTransform(node);
-  if (!ui?.getBoundingBoxToWorld) return boxes;
+  if (!ui?.getBoundingBoxToWorld) {
+    return { boxes, edges: mesh.edges };
+  }
 
   const uiBbox = ui.getBoundingBoxToWorld();
   const uiCss = worldRectToScreenCss(uiBbox);
@@ -221,13 +342,17 @@ const collectOverlayBoxes = (node: cc.Node): BoundsOverlayBox[] => {
     });
   }
 
-  if (!showFrameInner || !ui.convertToWorldSpaceAR) return boxes;
+  if (!showFrameInner || !ui.convertToWorldSpaceAR) {
+    return { boxes, edges: mesh.edges };
+  }
 
   const sp = getSprite(node);
   const frame = sp?.spriteFrame;
   const rect = frame?.rect;
   const os = frame?.originalSize;
-  if (!rect?.width || !rect?.height || !os) return boxes;
+  if (!rect?.width || !rect?.height || !os) {
+    return { boxes, edges: mesh.edges };
+  }
 
   const ow = Math.round(os.width ?? (os as { x?: number }).x ?? cw);
   const oh = Math.round(os.height ?? (os as { y?: number }).y ?? ch);
@@ -265,7 +390,7 @@ const collectOverlayBoxes = (node: cc.Node): BoundsOverlayBox[] => {
     });
   }
 
-  return boxes;
+  return { boxes, edges: mesh.edges };
 };
 
 const ensureOverlayRoot = (): HTMLDivElement => {
@@ -283,10 +408,57 @@ const ensureOverlayRoot = (): HTMLDivElement => {
   return overlayRoot;
 };
 
+const renderEdges = (
+  root: HTMLElement,
+  edges: OverlayEdge[],
+  nodeName: string
+): void => {
+  if (edges.length === 0) return;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', '100%');
+  svg.style.cssText = [
+    'position:fixed',
+    'inset:0',
+    'pointer-events:none',
+    'overflow:visible',
+  ].join(';');
+  for (const e of edges) {
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', String(e.x1));
+    line.setAttribute('y1', String(e.y1));
+    line.setAttribute('x2', String(e.x2));
+    line.setAttribute('y2', String(e.y2));
+    line.setAttribute('stroke', e.color);
+    line.setAttribute('stroke-width', '2');
+    svg.appendChild(line);
+    if (e.label) {
+      const tag = document.createElement('div');
+      tag.textContent = `${nodeName} · ${e.label}`;
+      tag.style.cssText = [
+        'position:fixed',
+        `left:${e.x1}px`,
+        `top:${e.y1 - 18}px`,
+        `color:${e.color}`,
+        'font:12px/1.2 monospace',
+        'white-space:nowrap',
+        'text-shadow:0 0 4px #000',
+        'background:rgba(0,0,0,0.55)',
+        'padding:1px 4px',
+        'pointer-events:none',
+      ].join(';');
+      root.appendChild(tag);
+    }
+  }
+  root.appendChild(svg);
+};
+
 const renderBoxes = (state: NodeBoundsOverlayState | null): void => {
   const root = ensureOverlayRoot();
   root.replaceChildren();
-  if (!state?.boxes.length) return;
+  if (!state) return;
+  if (state.edges?.length) renderEdges(root, state.edges, state.nodeName);
+  if (!state.boxes.length) return;
 
   for (const box of state.boxes) {
     const el = document.createElement('div');
@@ -348,8 +520,8 @@ const tick = (): void => {
 
   const nodeId = getNodeId(node);
   const nodeName = node.name || '(unnamed)';
-  const boxes = collectOverlayBoxes(node);
-  renderBoxes({ nodeId, nodeName, boxes });
+  const visuals = collectOverlayVisuals(node);
+  renderBoxes({ nodeId, nodeName, ...visuals });
   rafId = requestAnimationFrame(tick);
 };
 
@@ -372,7 +544,7 @@ export const showNodeBoundsOverlay = (
   renderBoxes({
     nodeId,
     nodeName: node.name || '(unnamed)',
-    boxes: collectOverlayBoxes(node),
+    ...collectOverlayVisuals(node),
   });
   scheduleTick();
   return { ok: true, nodeId, nodeName: node.name || '(unnamed)' };
@@ -391,7 +563,7 @@ export const showNodeBoundsByPath = (
   renderBoxes({
     nodeId: getNodeId(node),
     nodeName: node.name || '(unnamed)',
-    boxes: collectOverlayBoxes(node),
+    ...collectOverlayVisuals(node),
   });
   scheduleTick();
   return {
@@ -435,7 +607,7 @@ export const debugNodeBoundsByPath = (
     ok: true,
     nodeId: getNodeId(node),
     nodeName: node.name || '(unnamed)',
-    boxes: collectOverlayBoxes(node),
+    ...collectOverlayVisuals(node),
     canvasRect: canvas?.getBoundingClientRect() ?? null,
   };
 };

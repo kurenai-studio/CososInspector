@@ -1,0 +1,1054 @@
+/**
+ * Egret Inspector 面板（MVP）：stage 显示对象树 + 暂停 + MCP
+ * 结构与 pixi/panel.ts 对齐：挂 documentElement、hash 比对、收起即停轮询
+ */
+import { logEngine } from '../engine/detect';
+import { appendBugFeedbackButton } from '../engine/bugFeedback';
+import { mountInspectorRoot } from '../engine/mount';
+import {
+  bindMcpInstallGuide,
+  syncMcpGuideClickable,
+} from '../engine/mcpInstallGuide';
+import {
+  notePanelCollapsed,
+  startViewportWatch,
+} from '../engine/viewportWatch';
+import {
+  countNodes,
+  expandMatchingNodes,
+  renderTreeHtml,
+} from '../cocos3/treeRender';
+import { getPauseState, togglePause } from './gamePause';
+import { installMcpBridge } from './mcpBridge';
+import { getEgretVersion, type EgretDisplayObject } from './runtime';
+import {
+  buildTreeInfo,
+  findDisplayById,
+  getDisplayId,
+  getDisplayName,
+  getSceneRoot,
+  getPathToNode,
+  hashTree,
+  setNodeActive,
+} from './sceneTree';
+import { collectSpriteList } from './sprites';
+import { startPickMode, stopPickMode, isPickModeActive } from './nodePicker';
+import { getTextureSourceUrl, getNodeTexture } from './textureExtract';
+import { listDragonBonesUrls, exportDragonBones } from './dragonBonesExport';
+import { exportSpine } from './spineExport';
+import { exportMovieClip } from './movieClipExport';
+import { listSceneSpriteUrls, collectSceneAtlasInfo, collectSubtreeAtlasInfo, type AtlasInfo } from './sceneAssetsExport';
+import type { SceneAssetUrls } from './sceneAssetUrls';
+import { collectResourceList } from './resources';
+import type { SkeletonExportFile } from './skeletonCommon';
+import { buildCocosPlist, buildEgretJson } from './atlasReconstruct';
+
+declare const __INSPECTOR_VERSION__: string;
+
+const REFRESH_MS = 1500;
+
+export class EgretInspector {
+  private root: HTMLElement | null = null;
+  private panel: HTMLElement | null = null;
+  private edgeTab: HTMLButtonElement | null = null;
+  private sceneTreeContainer: HTMLElement | null = null;
+  private detailEl: HTMLElement | null = null;
+  private searchInput: HTMLInputElement | null = null;
+  private statusEl: HTMLElement | null = null;
+  private pauseBtn: HTMLButtonElement | null = null;
+  private mcpStatusEl: HTMLElement | null = null;
+
+  private expandedScene = new Set<string>();
+  private selectedId: string | null = null;
+  private searchQuery = '';
+  private isCollapsed = false;
+  private sceneTreeHash = '';
+  private updateTimer: number | null = null;
+  private isPickMode = false;
+  private pickBtn: HTMLButtonElement | null = null;
+  private downloadBtn: HTMLButtonElement | null = null;
+  private downloadMenu: HTMLElement | null = null;
+  private isDownloading = false;
+
+  constructor() {
+    this.init();
+  }
+
+  private init(): void {
+    try {
+      this.createUI();
+      this.bindTreeEvents();
+      installMcpBridge();
+      this.refreshAll(true);
+      this.startAutoRefresh();
+      startViewportWatch('egret');
+      window.postMessage(
+        { type: 'cocos-inspector-ready', engineFamily: 'egret' },
+        '*'
+      );
+      logEngine('已启动 Egret 面板（MVP）');
+    } catch (e) {
+      console.error('[Cocos Inspector] Egret 面板初始化失败', e);
+    }
+  }
+
+  private createUI(): void {
+    this.root = document.createElement('div');
+    this.root.className = 'cocos-inspector-root';
+
+    this.edgeTab = document.createElement('button');
+    this.edgeTab.type = 'button';
+    this.edgeTab.className = 'inspector-edge-tab';
+    this.edgeTab.textContent = '节点树';
+    this.edgeTab.title = '展开 Egret Inspector';
+    this.edgeTab.addEventListener('click', () => this.setCollapsed(false));
+    this.root.appendChild(this.edgeTab);
+
+    this.panel = document.createElement('div');
+    this.panel.className = 'cocos-inspector-panel';
+
+    const header = document.createElement('div');
+    header.className = 'cocos-inspector-header';
+
+    const headerTop = document.createElement('div');
+    headerTop.className = 'inspector-header-top';
+
+    const titleBlock = document.createElement('div');
+    titleBlock.className = 'inspector-header-title-block';
+
+    const titleRow = document.createElement('div');
+    titleRow.className = 'inspector-title-row';
+
+    const title = document.createElement('h3');
+    title.textContent = 'Egret Inspector';
+    titleRow.appendChild(title);
+
+    const inspectorVersion = document.createElement('span');
+    inspectorVersion.className = 'inspector-version';
+    inspectorVersion.textContent = `v${__INSPECTOR_VERSION__}`;
+    titleRow.appendChild(inspectorVersion);
+    titleBlock.appendChild(titleRow);
+
+    const version = document.createElement('span');
+    version.className = 'engine-version';
+    version.textContent = `引擎 ${getEgretVersion()}`;
+    titleBlock.appendChild(version);
+    headerTop.appendChild(titleBlock);
+
+    this.mcpStatusEl = document.createElement('div');
+    this.mcpStatusEl.className = 'mcp-status mcp-status--disconnected';
+    this.mcpStatusEl.innerHTML =
+      '<span class="mcp-status-dot" aria-hidden="true"></span>' +
+      '<span class="mcp-status-label">MCP</span>';
+    this.updateMcpStatus('disconnected', 17373);
+    headerTop.appendChild(this.mcpStatusEl);
+    if (this.panel) bindMcpInstallGuide(this.mcpStatusEl, this.panel);
+    header.appendChild(headerTop);
+
+    window.addEventListener('message', (ev) => {
+      if (ev.source !== window || ev.data?.type !== 'cocos-mcp-status') return;
+      this.updateMcpStatus(
+        ev.data.status ?? 'disconnected',
+        ev.data.port ?? 17373
+      );
+    });
+
+    const controls = document.createElement('div');
+    controls.className = 'inspector-controls';
+
+    const refreshBtn = document.createElement('button');
+    refreshBtn.type = 'button';
+    refreshBtn.className = 'refresh-btn';
+    refreshBtn.textContent = '刷新';
+    refreshBtn.addEventListener('click', () => this.refreshAll(true));
+    controls.appendChild(refreshBtn);
+
+    this.pauseBtn = document.createElement('button');
+    this.pauseBtn.type = 'button';
+    this.pauseBtn.className = 'pause-btn';
+    this.pauseBtn.textContent = '暂停';
+    this.pauseBtn.title = '暂停/恢复（egret.ticker.pause/resume）';
+    this.pauseBtn.addEventListener('click', () => this.toggleGamePause());
+    controls.appendChild(this.pauseBtn);
+
+    this.searchInput = document.createElement('input');
+    this.searchInput.type = 'search';
+    this.searchInput.className = 'search-input';
+    this.searchInput.placeholder = '搜索节点名称…';
+    this.searchInput.addEventListener('input', () => {
+      this.searchQuery = this.searchInput?.value.trim().toLowerCase() ?? '';
+      this.refreshAll(true);
+    });
+    controls.appendChild(this.searchInput);
+
+    appendBugFeedbackButton(controls, this.panel);
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'header-toggle-btn';
+    toggleBtn.textContent = '收起';
+    toggleBtn.addEventListener('click', () => this.setCollapsed(!this.isCollapsed));
+    controls.appendChild(toggleBtn);
+
+    this.pickBtn = document.createElement('button');
+    this.pickBtn.type = 'button';
+    this.pickBtn.className = 'pick-btn';
+    this.pickBtn.textContent = '拾取';
+    this.pickBtn.title = '点击页面元素 → 自动定位到节点树';
+    this.pickBtn.addEventListener('click', () => this.togglePickMode());
+    controls.appendChild(this.pickBtn);
+
+    this.downloadBtn = document.createElement('button');
+    this.downloadBtn.type = 'button';
+    this.downloadBtn.className = 'download-btn';
+    this.downloadBtn.textContent = '下载';
+    this.downloadBtn.title = '导出资源到本地目录';
+    this.downloadBtn.addEventListener('click', () => this.toggleDownloadMenu());
+    controls.appendChild(this.downloadBtn);
+
+    this.downloadMenu = document.createElement('div');
+    this.downloadMenu.className = 'download-menu';
+    this.downloadMenu.style.display = 'none';
+    const dlItems: Array<{ key: string; label: string }> = [
+      { key: 'scene', label: '整场景下载原图' },
+      { key: 'scene-urls', label: '整场景资源 URL 清单（图片+龙骨+Spine+MovieClip，外部 Node 脚本批量拉取）' },
+      { key: 'scene-atlas', label: '整场景图集还原（按 sprite 裁剪）' },
+      { key: 'node-subtree', label: '选中节点子树资源（图集+龙骨）' },
+      { key: 'node-texture', label: '选中节点纹理 PNG' },
+      { key: 'node-dragonbones', label: '选中节点龙骨 zip' },
+      { key: 'node-dragonbones-full', label: '选中节点龙骨完整（内存 ske+tex+png）' },
+      { key: 'node-spine-full', label: '选中节点 Spine 完整（内存 json+skel+atlas+png）' },
+      { key: 'node-movieclip-full', label: '选中节点 MovieClip（序列帧 PNG + manifest）' },
+      { key: 'resources', label: '资源 URL 清单 JSON' },
+    ];
+    for (const it of dlItems) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'download-menu-item';
+      b.textContent = it.label;
+      b.dataset.key = it.key;
+      b.addEventListener('click', () => {
+        this.onDownload(it.key).catch((e) => {
+          this.setStatus(`下载失败: ${e instanceof Error ? e.message : String(e)}`);
+        });
+      });
+      this.downloadMenu.appendChild(b);
+    }
+    // 挂到 body 而非 controls：避免被 .cocos-inspector-panel 的 backdrop-filter
+    // 建立新 containing block，导致 fixed 重新相对 panel + overflow:hidden 裁切
+    document.body.appendChild(this.downloadMenu);
+
+    document.addEventListener('click', (ev) => {
+      if (this.isCollapsed) return;
+      const target = ev.target as Node;
+      if (this.downloadMenu?.contains(target)) return;
+      if (this.downloadBtn === target) return;
+      this.hideDownloadMenu();
+    });
+
+    header.appendChild(controls);
+    this.panel.appendChild(header);
+
+    this.statusEl = document.createElement('div');
+    this.statusEl.className = 'inspector-status';
+    this.panel.appendChild(this.statusEl);
+
+    const mainBody = document.createElement('div');
+    mainBody.className = 'inspector-main';
+
+    this.sceneTreeContainer = document.createElement('div');
+    this.sceneTreeContainer.className = 'node-tree-panel';
+    mainBody.appendChild(this.sceneTreeContainer);
+
+    this.detailEl = document.createElement('div');
+    this.detailEl.className = 'node-inspector';
+    this.detailEl.innerHTML =
+      '<div class="node-inspector-title">Inspector</div>' +
+      '<div class="node-inspector-body"><div class="empty-inspector">选择节点</div></div>';
+    mainBody.appendChild(this.detailEl);
+
+    this.panel.appendChild(mainBody);
+    this.root.appendChild(this.panel);
+    mountInspectorRoot(this.root);
+  }
+
+  private updateMcpStatus(
+    status: 'connected' | 'disconnected' | string,
+    port: number
+  ): void {
+    if (!this.mcpStatusEl) return;
+    const labels: Record<string, string> = {
+      connected: '已连接',
+      disconnected: '未连接',
+    };
+    this.mcpStatusEl.className = `mcp-status mcp-status--${status}`;
+    const label = this.mcpStatusEl.querySelector('.mcp-status-label');
+    if (label) label.textContent = `MCP · ${labels[status] ?? status}`;
+    const hints: Record<string, string> = {
+      connected: `已连接 Cursor MCP 桥接（端口 ${port}，Egret MVP）`,
+      disconnected:
+        `未连接 MCP。请在 Cursor 启用 cocos-inspector MCP，并确认端口 ${port} 可用。`,
+    };
+    this.mcpStatusEl.title =
+      status === 'disconnected'
+        ? '未连接 MCP。点击查看安装指引'
+        : hints[status] ?? `MCP 状态: ${status}`;
+    syncMcpGuideClickable(this.mcpStatusEl, status);
+  }
+
+  private togglePickMode(): void {
+    if (this.isPickMode) {
+      this.stopPickModeInternal();
+    } else {
+      this.startPickModeInternal();
+    }
+  }
+
+  private startPickModeInternal(): void {
+    if (this.isPickMode) return;
+    this.isPickMode = true;
+    this.pickBtn?.classList.add('pick-btn--active');
+    if (this.pickBtn) this.pickBtn.textContent = '取消拾取';
+    if (!isPickModeActive()) {
+      startPickMode((nodeId) => this.onNodePicked(nodeId));
+    }
+  }
+
+  private stopPickModeInternal(): void {
+    if (!this.isPickMode) return;
+    this.isPickMode = false;
+    this.pickBtn?.classList.remove('pick-btn--active');
+    if (this.pickBtn) this.pickBtn.textContent = '拾取';
+    stopPickMode();
+  }
+
+  private toggleDownloadMenu(): void {
+    if (!this.downloadMenu || !this.downloadBtn) return;
+    const open = this.downloadMenu.style.display !== 'none';
+    if (open) {
+      this.hideDownloadMenu();
+      return;
+    }
+    // 用 fixed 定位脱离 .cocos-inspector-panel overflow:hidden 限制
+    const rect = this.downloadBtn.getBoundingClientRect();
+    this.downloadMenu.style.display = 'block';
+    this.downloadMenu.style.left = `${Math.max(8, rect.right - 280)}px`;
+    this.downloadMenu.style.top = `${rect.bottom + 4}px`;
+  }
+
+  private hideDownloadMenu(): void {
+    if (this.downloadMenu) this.downloadMenu.style.display = 'none';
+  }
+
+  private async pickDirectory(): Promise<FileSystemDirectoryHandle | null> {
+    const fn = (window as unknown as {
+      showDirectoryPicker?: (opts?: { mode?: string }) => Promise<FileSystemDirectoryHandle>;
+    }).showDirectoryPicker;
+    if (typeof fn !== 'function') {
+      throw new Error('当前浏览器不支持目录选择（需 Chrome/Edge 117+）');
+    }
+    try {
+      return await fn.call(window, { mode: 'readwrite' });
+    } catch {
+      return null; // 用户取消
+    }
+  }
+
+  private async writeFileToDir(
+    dir: FileSystemDirectoryHandle,
+    filename: string,
+    data: BlobPart
+  ): Promise<void> {
+    // filename 可能含子目录（如 images/bg.png）→ 拆分 + 创建子目录
+    const parts = filename.split(/[\\/]/).filter(Boolean);
+    let cur = dir;
+    for (let i = 0; i < parts.length - 1; i++) {
+      cur = await (cur as unknown as {
+        getDirectoryHandle: (name: string, opts?: { create?: boolean }) => Promise<FileSystemDirectoryHandle>;
+      }).getDirectoryHandle(parts[i], { create: true });
+    }
+    const safeName = parts[parts.length - 1].replace(/[/\\?%*:|"<>]/g, '_');
+    const fh = await (cur as unknown as {
+      getFileHandle: (name: string, opts?: { create?: boolean }) => Promise<{
+        createWritable: () => Promise<{ write: (d: BlobPart) => Promise<void>; close: () => Promise<void> }>;
+      }>;
+    }).getFileHandle(safeName, { create: true });
+    const w = await fh.createWritable();
+    await w.write(data);
+    await w.close();
+  }
+
+  /** fetch CDN URL → blob → 写入目录；返回字节数 */
+  private async fetchAndWrite(
+    url: string,
+    dir: FileSystemDirectoryHandle,
+    filename: string
+  ): Promise<number> {
+    const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
+    if (!res.ok) throw new Error(`fetch ${url} → HTTP ${res.status}`);
+    const blob = await res.blob();
+    const bytes = blob.size;
+    await this.writeFileToDir(dir, filename, blob);
+    return bytes;
+  }
+
+  /** 加载 HTMLImageElement（src 可以是 http/cdn 或 blob:URL） */
+  private loadImage(src: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error(`图片加载失败: ${src.slice(0, 80)}`));
+      img.src = src;
+    });
+  }
+
+  /** canvas drawImage 裁剪 sprite 区域 → PNG Blob */
+  private cropSprite(
+    img: HTMLImageElement,
+    x: number,
+    y: number,
+    w: number,
+    h: number
+  ): Promise<Blob> {
+    return new Promise((resolve, reject) => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(w));
+        canvas.height = Math.max(1, Math.round(h));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('canvas 2D 上下文不可用'));
+          return;
+        }
+        ctx.drawImage(
+          img,
+          x, y, w, h,
+          0, 0, canvas.width, canvas.height
+        );
+        canvas.toBlob(
+          (b) => {
+            if (b) resolve(b);
+            else reject(new Error('toBlob 返回 null'));
+          },
+          'image/png'
+        );
+      } catch (e) {
+        reject(e instanceof Error ? e : new Error(String(e)));
+      }
+    });
+  }
+
+  /** Windows 文件名非法字符替换为 _ */
+  private safeName(name: string): string {
+    const cleaned = (name || 'sprite').trim().replace(/[\\/:*?"<>|]/g, '_');
+    return cleaned.length > 100 ? cleaned.slice(0, 100) : cleaned;
+  }
+
+  /** base64 → Blob */
+  private base64ToBlob(b64: string, mime: string): Blob {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type: mime || 'application/octet-stream' });
+  }
+
+  /**
+   * 把 SkeletonExportFile[] 展平写入目录：{subDir}/{baseName}/{file.name}
+   * - text → Blob([text])
+   * - dataBase64 → base64ToBlob
+   * - url → fetchAndWrite（fallback，CDN 失败也跳过）
+   */
+  private async writeSkeletonFilesToDir(
+    files: SkeletonExportFile[],
+    dir: FileSystemDirectoryHandle,
+    baseName: string,
+    subDir: string = 'dragonbones'
+  ): Promise<{ written: string[]; errors: string[] }> {
+    const written: string[] = [];
+    const errors: string[] = [];
+    for (const f of files) {
+      const relPath = `${subDir}/${this.safeName(baseName)}/${f.name}`;
+      try {
+        if (f.text != null) {
+          await this.writeFileToDir(dir, relPath, new Blob([f.text], { type: f.mime }));
+          written.push(relPath);
+        } else if (f.dataBase64 != null) {
+          await this.writeFileToDir(dir, relPath, this.base64ToBlob(f.dataBase64, f.mime));
+          written.push(relPath);
+        } else if (f.url) {
+          try {
+            await this.fetchAndWrite(f.url, dir, relPath);
+            written.push(relPath);
+          } catch (e) {
+            errors.push(`${f.name}: ${(e as Error).message} (URL fallback 失败)`);
+          }
+        }
+      } catch (e) {
+        errors.push(`${f.name}: ${(e as Error).message}`);
+      }
+    }
+    return { written, errors };
+  }
+
+  /**
+   * 图集还原核心：收 atlases → 下载原图 → canvas 按 sprite 区域裁剪 → 写入 sprites/
+   * 同时把原图备份到 images/，atlas-manifest.json 备份区域信息。
+   * 返回 { written, errors, spriteDone, totalSprites }。
+   */
+  private async downloadAtlasesToDir(
+    atlases: AtlasInfo[],
+    dir: FileSystemDirectoryHandle
+  ): Promise<{ written: string[]; errors: string[]; spriteDone: number; totalSprites: number }> {
+    const written: string[] = [];
+    const errors: string[] = [];
+    const totalSprites = atlases.reduce((s, a) => s + a.sprites.length, 0);
+    if (atlases.length === 0) {
+      return { written, errors, totalSprites, spriteDone: 0 };
+    }
+    this.setStatus(`发现 ${atlases.length} 个图集 · ${totalSprites} 个 sprite，开始还原到 ${dir.name} …`);
+
+    // 写 manifest 备份（含图集 URL + sprite 区域，便于离线重做）
+    const manifest = atlases.map((a) => ({
+      url: a.url,
+      filename: a.filename,
+      sprites: a.sprites.map((s) => ({ name: s.name, x: s.x, y: s.y, w: s.w, h: s.h, nodeId: s.nodeId })),
+    }));
+    await this.writeFileToDir(dir, 'atlas-manifest.json', JSON.stringify(manifest, null, 2));
+
+    let spriteDone = 0;
+    for (const atlas of atlases) {
+      // fetch 原图 → Image
+      let img: HTMLImageElement;
+      try {
+        const res = await fetch(atlas.url, { mode: 'cors', credentials: 'omit' });
+        if (!res.ok) { errors.push(`${atlas.filename}: HTTP ${res.status}`); continue; }
+        const blob = await res.blob();
+        const urlObj = URL.createObjectURL(blob);
+        img = await this.loadImage(urlObj);
+        URL.revokeObjectURL(urlObj);
+      } catch (e) {
+        errors.push(`${atlas.filename}: ${(e as Error).message}`);
+        continue;
+      }
+      // 写原图备份
+      try {
+        const res2 = await fetch(atlas.url, { mode: 'cors', credentials: 'omit' });
+        if (res2.ok) {
+          const blob2 = await res2.blob();
+          await this.writeFileToDir(dir, `images/${atlas.filename}`, blob2);
+        }
+      } catch { /* ignore */ }
+
+      // 裁剪每个 sprite
+      for (const sp of atlas.sprites) {
+        try {
+          const png = await this.cropSprite(img, sp.x, sp.y, sp.w, sp.h);
+          await this.writeFileToDir(dir, `sprites/${this.safeName(sp.name)}.png`, png);
+          spriteDone++;
+          if (spriteDone % 10 === 0 || spriteDone === totalSprites) {
+            this.setStatus(`图集还原 ${spriteDone}/${totalSprites} …`);
+          }
+        } catch (e) {
+          errors.push(`sprite ${sp.name}: ${(e as Error).message}`);
+        }
+      }
+
+      // 输出 atlas 元数据：Cocos .plist + Egret .json，与裁剪好的 sprite PNG 配套
+      try {
+        const baseMetaName = this.safeName(atlas.filename.replace(/\.[^.]+$/, ''));
+        const plistText = buildCocosPlist(atlas);
+        const jsonText = buildEgretJson(atlas);
+        await this.writeFileToDir(dir, `atlas-meta/${baseMetaName}.plist`, new Blob([plistText], { type: 'application/xml' }));
+        await this.writeFileToDir(dir, `atlas-meta/${baseMetaName}.json`, new Blob([jsonText], { type: 'application/json' }));
+      } catch (e) {
+        errors.push(`atlas-meta ${atlas.filename}: ${(e as Error).message}`);
+      }
+    }
+    written.push(`sprites/ (${spriteDone} 个)`, 'images/', 'atlas-meta/', 'atlas-manifest.json');
+    if (errors.length) {
+      this.setStatus(`图集还原完成: ${spriteDone}/${totalSprites} sprite → 目录 ${dir.name} · 失败 ${errors.length}`);
+    } else {
+      this.setStatus(`图集还原完成: ${spriteDone}/${totalSprites} sprite → 目录 ${dir.name}`);
+    }
+    return { written, errors, spriteDone, totalSprites };
+  }
+
+  private async onDownload(key: string): Promise<void> {
+    this.hideDownloadMenu();
+    if (this.isDownloading) {
+      this.setStatus('正在下载，请等待…');
+      return;
+    }
+
+    const dir = await this.pickDirectory();
+    if (!dir) return; // 用户取消
+
+    this.isDownloading = true;
+    this.downloadBtn && (this.downloadBtn.disabled = true);
+    this.setStatus(`下载中（${key}）… 选定目录: ${dir.name}`);
+
+    try {
+      const written: string[] = [];
+      const errors: string[] = [];
+
+      if (key === 'scene') {
+        const items = listSceneSpriteUrls();
+        if (items.length === 0) throw new Error('场景中无 Sprite 资源');
+        this.setStatus(`下载场景 ${items.length} 张图到 ${dir.name} …`);
+        let okN = 0;
+        // 限流并发 8
+        const concurrency = 8;
+        let idx = 0;
+        const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+          while (idx < items.length) {
+            const cur = items[idx++];
+            try {
+              await this.fetchAndWrite(cur.url, dir, `images/${cur.name}`);
+              written.push(cur.name);
+              okN++;
+              if (okN % 5 === 0 || okN === items.length) {
+                this.setStatus(`下载中 ${okN}/${items.length} …`);
+              }
+            } catch (e) {
+              errors.push(`${cur.name}: ${(e as Error).message}`);
+            }
+          }
+        });
+        await Promise.all(workers);
+      } else if (key === 'scene-urls') {
+        // 整场景资源 URL 清单：只列 URL，不拉字节（避免内存爆 + egret 卡死）
+        // 输出 scene-urls.json，由外部 Node 脚本 tools/download-scene-urls.mjs 批量拉取
+        this.setStatus('收集场景资源 URL 清单 …');
+        const api = (window as unknown as { __cocosInspectorApi?: { collectSceneAssetUrls?: () => SceneAssetUrls } }).__cocosInspectorApi;
+        if (!api?.collectSceneAssetUrls) {
+          throw new Error('collectSceneAssetUrls 未暴露');
+        }
+        const data = api.collectSceneAssetUrls();
+        const g = data.groups;
+        const groupCounts = {
+          sprites: g.sprites.length,
+          dragonBones: g.dragonBones.length,
+          spines: g.spines.length,
+          movieclips: g.movieclips.length,
+          resources: Array.isArray(g.resources) ? g.resources.length : 0,
+        };
+        const json = JSON.stringify(data, null, 2);
+        await this.writeFileToDir(dir, 'scene-urls.json', new Blob([json], { type: 'application/json' }));
+        written.push('scene-urls.json');
+        this.setStatus(
+          `URL 清单已写入: 共 ${data.totals.totalUrls} 个 URL · 分组 ${JSON.stringify(groupCounts)} → ${dir.name}/scene-urls.json · 下一步执行: node tools/download-scene-urls.mjs ${dir.name}/scene-urls.json`
+        );
+      } else if (key === 'scene-atlas') {
+        // 整场景图集还原：collectSceneAtlasInfo → downloadAtlasesToDir
+        const atlases: AtlasInfo[] = collectSceneAtlasInfo();
+        if (atlases.length === 0) throw new Error('场景中无图集 sprite');
+        const r = await this.downloadAtlasesToDir(atlases, dir);
+        r.written.forEach((w) => written.push(w));
+        r.errors.forEach((e) => errors.push(e));
+      } else if (key === 'node-subtree') {
+        // 选中节点子树下载：图集还原 + 龙骨（递归子节点）
+        const node = this.getSelectedNode();
+        if (!node) throw new Error('请先选中节点');
+        const atlases: AtlasInfo[] = collectSubtreeAtlasInfo(node);
+        // 子树龙骨节点：listDragonBonesUrls 直接递归子树里的 isArmatureDisplay
+        const dbIds: string[] = [];
+        const seenIds = new Set<string>();
+        const walk = (n: EgretDisplayObject | null | undefined): void => {
+          if (!n) return;
+          // isArmatureDisplay 在 dragonBonesExport 内部判断；这里只用 instanceof 简单试探
+          const ctor = n.constructor?.name || '';
+          if (/EgretArmatureDisplay|ArmatureDisplay/i.test(ctor)) {
+            const id = getDisplayId(n);
+            if (id && !seenIds.has(id)) {
+              seenIds.add(id);
+              dbIds.push(id);
+            }
+          }
+          const kids = (n as { $children?: EgretDisplayObject[] }).$children;
+          if (Array.isArray(kids)) for (const c of kids) walk(c);
+        };
+        walk(node);
+        const totalSprites = atlases.reduce((s, a) => s + a.sprites.length, 0);
+        this.setStatus(`子树: ${atlases.length} 图集 · ${totalSprites} sprite · ${dbIds.length} 龙骨节点 → 开始下载到 ${dir.name} …`);
+
+        // 1) 图集还原
+        if (atlases.length > 0) {
+          const r = await this.downloadAtlasesToDir(atlases, dir);
+          r.written.forEach((w) => written.push(w));
+          r.errors.forEach((e) => errors.push(e));
+        }
+
+        // 2) 龙骨节点 URL → fetch
+        for (const dbId of dbIds) {
+          const r = listDragonBonesUrls(dbId);
+          if (!r.ok || !r.urls || r.urls.length === 0) {
+            errors.push(`龙骨 ${dbId}: ${r.error || '无 URL'}`);
+            continue;
+          }
+          const baseName = r.armatureName || dbId;
+          for (const u of r.urls) {
+            try {
+              await this.fetchAndWrite(u.url, dir, `dragonbones/${baseName}/${u.name}`);
+              written.push(`dragonbones/${baseName}/${u.name}`);
+            } catch (e) {
+              errors.push(`${u.name}: ${(e as Error).message}`);
+            }
+          }
+        }
+      } else if (key === 'node-texture') {
+        const node = this.getSelectedNode();
+        if (!node) throw new Error('请先选中节点');
+        const tex = getNodeTexture(node);
+        if (!tex) throw new Error('选中节点无 texture');
+        const url = getTextureSourceUrl(tex);
+        if (!url) throw new Error('选中节点的纹理无 CDN URL（可能是 canvas 绘制）');
+        const name = getDisplayName(node) || getDisplayId(node);
+        const filename = `${name}_${getDisplayId(node)}_${url.split('/').pop()?.split('?')[0] || 'image.png'}`;
+        await this.fetchAndWrite(url, dir, filename);
+        written.push(filename);
+      } else if (key === 'node-dragonbones') {
+        const node = this.getSelectedNode();
+        if (!node) throw new Error('请先选中节点');
+        const id = getDisplayId(node);
+        const r = listDragonBonesUrls(id);
+        if (!r.ok || !r.urls || r.urls.length === 0) {
+          throw new Error(r.error || `龙骨 ${id} 未找到 URL`);
+        }
+        const baseName = r.armatureName || id;
+        this.setStatus(`下载龙骨 ${baseName} ${r.urls.length} 个文件到 ${dir.name} …`);
+        for (const u of r.urls) {
+          try {
+            await this.fetchAndWrite(u.url, dir, `dragonbones/${baseName}/${u.name}`);
+            written.push(u.name);
+          } catch (e) {
+            errors.push(`${u.name}: ${(e as Error).message}`);
+          }
+        }
+      } else if (key === 'node-dragonbones-full') {
+        // 内存回读完整龙骨：调 exportDragonBones → files → 展平到 dragonbones/{name}/
+        const node = this.getSelectedNode();
+        if (!node) throw new Error('请先选中节点');
+        const id = getDisplayId(node);
+        this.setStatus(`从内存提取龙骨 ${id}（ske+tex+png）…`);
+        const r = await exportDragonBones(id);
+        if (!r.ok) {
+          throw new Error(r.error || r.reason || `龙骨 ${id} 导出失败`);
+        }
+        const baseName = r.zipName.replace(/_dragonBones\.zip$/i, '') || id;
+        this.setStatus(`龙骨 ${baseName}: ${r.files.length} 个文件 → 写入 ${dir.name} …`);
+        const wr = await this.writeSkeletonFilesToDir(r.files, dir, baseName);
+        wr.written.forEach((w) => written.push(w));
+        wr.errors.forEach((e) => errors.push(e));
+        this.setStatus(`龙骨 ${baseName} 完成: ${wr.written.length}/${r.files.length} 文件 → ${dir.name}`);
+      } else if (key === 'node-spine-full') {
+        // 内存回读完整 Spine：调 exportSpine → files → 展平到 spines/{name}/
+        const node = this.getSelectedNode();
+        if (!node) throw new Error('请先选中节点');
+        const id = getDisplayId(node);
+        this.setStatus(`从内存提取 Spine ${id}（json+skel+atlas+png）…`);
+        const r = await exportSpine(id);
+        if (!r.ok) {
+          throw new Error(r.error || r.reason || `Spine ${id} 导出失败`);
+        }
+        const baseName = r.zipName.replace(/_spine\.zip$/i, '') || id;
+        this.setStatus(`Spine ${baseName}: ${r.files.length} 个文件 → 写入 ${dir.name} …`);
+        const wr = await this.writeSkeletonFilesToDir(r.files, dir, baseName, 'spines');
+        wr.written.forEach((w) => written.push(w));
+        wr.errors.forEach((e) => errors.push(e));
+        this.setStatus(`Spine ${baseName} 完成: ${wr.written.length}/${r.files.length} 文件 → ${dir.name}`);
+      } else if (key === 'node-movieclip-full') {
+        // MovieClip 序列帧：调 exportMovieClip → files → 展平到 movieclips/{name}/
+        const node = this.getSelectedNode();
+        if (!node) throw new Error('请先选中节点');
+        const id = getDisplayId(node);
+        this.setStatus(`从内存提取 MovieClip ${id}（序列帧 PNG + manifest）…`);
+        const r = await exportMovieClip(id);
+        if (!r.ok) {
+          throw new Error(r.error || r.reason || `MovieClip ${id} 导出失败`);
+        }
+        const baseName = r.zipName.replace(/_movieclip\.zip$/i, '') || id;
+        this.setStatus(`MovieClip ${baseName}: ${r.files.length} 个文件 → 写入 ${dir.name} …`);
+        const wr = await this.writeSkeletonFilesToDir(r.files, dir, baseName, 'movieclips');
+        wr.written.forEach((w) => written.push(w));
+        wr.errors.forEach((e) => errors.push(e));
+        this.setStatus(`MovieClip ${baseName} 完成: ${wr.written.length}/${r.files.length} 文件 → ${dir.name}`);
+      } else if (key === 'resources') {
+        const list = collectResourceList(2000);
+        const json = JSON.stringify(list, null, 2);
+        await this.writeFileToDir(dir, 'resources.json', json);
+        written.push('resources.json');
+      } else {
+        throw new Error(`未知下载类型: ${key}`);
+      }
+
+      const summary =
+        written.length === 0
+          ? errors.length
+            ? '（无文件下载成功）'
+            : '（无文件）'
+          : written.length <= 5
+          ? written.join(', ')
+          : `${written.slice(0, 5).join(', ')} 等 ${written.length} 个`;
+      const errSummary = errors.length
+        ? ` · 失败 ${errors.length}: ${errors.slice(0, 2).join('; ')}`
+        : '';
+      this.setStatus(`下载完成: ${summary} → 目录 ${dir.name}${errSummary}`);
+    } catch (e) {
+      this.setStatus(`下载失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      this.isDownloading = false;
+      this.downloadBtn && (this.downloadBtn.disabled = false);
+    }
+  }
+
+  private getSelectedNode(): EgretDisplayObject | null {
+    const root = getSceneRoot();
+    if (!root || !this.selectedId) return null;
+    return findDisplayById(root, this.selectedId);
+  }
+
+  private onNodePicked(nodeId: string): void {
+    this.selectedId = nodeId;
+    const root = getSceneRoot();
+    if (root) {
+      const path = getPathToNode(root, nodeId);
+      if (path) {
+        for (const id of path) this.expandedScene.add(id);
+      }
+    }
+    this.stopPickModeInternal();
+    this.refreshAll(true);
+    // 拾取后自动滚动到节点位置（center）
+    requestAnimationFrame(() => this.scrollSelectedIntoView());
+  }
+
+  private scrollSelectedIntoView(): void {
+    if (!this.sceneTreeContainer) return;
+    const sel = this.sceneTreeContainer.querySelector(
+      'li.node-tree-item.selected, li[data-uuid].selected'
+    ) as HTMLElement | null;
+    if (sel) {
+      sel.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+
+  private setCollapsed(collapsed: boolean): void {
+    if (!this.root || this.isCollapsed === collapsed) return;
+    this.isCollapsed = collapsed;
+    this.root.classList.toggle('is-collapsed', collapsed);
+    notePanelCollapsed(collapsed);
+
+    if (collapsed) {
+      this.stopAutoRefresh();
+      if (this.sceneTreeContainer) this.sceneTreeContainer.innerHTML = '';
+      this.panel?.remove();
+      return;
+    }
+
+    if (this.panel && !this.root.contains(this.panel)) {
+      this.root.appendChild(this.panel);
+    }
+    this.refreshAll(true);
+    this.startAutoRefresh();
+  }
+
+  private startAutoRefresh(): void {
+    if (this.isCollapsed) return;
+    this.stopAutoRefresh();
+    this.updateTimer = window.setInterval(() => this.refreshAll(false), REFRESH_MS);
+  }
+
+  private stopAutoRefresh(): void {
+    if (this.updateTimer != null) {
+      window.clearInterval(this.updateTimer);
+      this.updateTimer = null;
+    }
+  }
+
+  private bindTreeEvents(): void {
+    this.sceneTreeContainer?.addEventListener('change', (event: Event) => {
+      const target = event.target as HTMLElement;
+      const toggle = target.closest('.node-active-toggle') as HTMLInputElement | null;
+      if (!toggle || toggle.type !== 'checkbox') return;
+      event.stopPropagation();
+      const nodeId = toggle.dataset.uuid;
+      if (!nodeId) return;
+      const active = toggle.checked;
+      const ok = setNodeActive(nodeId, active);
+      if (!ok) {
+        toggle.checked = !active;
+        return;
+      }
+      const scene = getSceneRoot();
+      const node = scene ? findDisplayById(scene, nodeId) : null;
+      console.log(
+        `[Active编辑:egret] ${getDisplayName(node ?? {})}(${nodeId}) visible=${active}`
+      );
+      this.refreshAll(true);
+    });
+
+    this.sceneTreeContainer?.addEventListener('click', (event: Event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest('.node-active-toggle')) return;
+
+      const toggle = target.closest('.node-toggle');
+      const row = target.closest('.node-tree-item');
+
+      if (toggle) {
+        const li = toggle.closest('li');
+        const id = li?.dataset.uuid;
+        if (!id) return;
+        if (this.expandedScene.has(id)) this.expandedScene.delete(id);
+        else this.expandedScene.add(id);
+        this.refreshAll(true);
+        return;
+      }
+
+      if (row) {
+        const id = row.closest('li')?.dataset.uuid;
+        if (!id) return;
+        this.selectedId = id;
+        this.refreshAll(true);
+      }
+    });
+  }
+
+  private refreshAll(force: boolean): void {
+    if (this.isCollapsed) return;
+
+    const scene = getSceneRoot();
+    if (!scene) {
+      this.setStatus('未找到 Egret stage（egret.sys.$TempStage 为空）');
+      if (this.sceneTreeContainer) {
+        this.sceneTreeContainer.innerHTML =
+          '<div class="empty-scene">等待 Egret 舞台就绪…</div>';
+      }
+      return;
+    }
+
+    const treeInfo = buildTreeInfo(scene, this.expandedScene);
+    const treeOnlyHash = hashTree(treeInfo);
+    const treeChanged = force || treeOnlyHash !== this.sceneTreeHash;
+
+    if (treeChanged) {
+      this.sceneTreeHash = treeOnlyHash;
+      if (this.searchQuery) {
+        expandMatchingNodes(treeInfo, this.searchQuery, this.expandedScene);
+      }
+      const sceneRootId = getDisplayId(scene);
+      if (this.sceneTreeContainer) {
+        this.sceneTreeContainer.innerHTML = `<ul class="node-tree">${renderTreeHtml(
+          treeInfo,
+          {
+            expanded: this.expandedScene,
+            selectedId: this.selectedId,
+            searchQuery: this.searchQuery,
+            isRoot: true,
+            sceneRootId,
+          }
+        )}</ul>`;
+      }
+    }
+
+    this.refreshDetail();
+    this.syncPauseButton();
+
+    const sprites = collectSpriteList();
+    const pauseTag = getPauseState().paused ? ' · 已暂停' : '';
+    this.setStatus(
+      `Egret stage · ${countNodes(treeInfo)} 节点 · ${sprites.length} 贴图` +
+        ` · ${getDisplayName(scene)}${pauseTag}`
+    );
+  }
+
+  private refreshDetail(): void {
+    const title = this.detailEl?.querySelector('.node-inspector-title');
+    const body = this.detailEl?.querySelector('.node-inspector-body');
+    if (!body) return;
+
+    const root = getSceneRoot();
+    if (!root || !this.selectedId) {
+      if (title) title.textContent = 'Inspector';
+      body.innerHTML = '<div class="empty-inspector">选择节点</div>';
+      return;
+    }
+
+    const node = findDisplayById(root, this.selectedId);
+    if (!node) {
+      if (title) title.textContent = 'Inspector';
+      body.innerHTML = '<div class="empty-inspector">节点已消失</div>';
+      return;
+    }
+
+    const name = getDisplayName(node);
+    if (title) title.textContent = `Inspector · ${name}`;
+    body.innerHTML = buildDetailRows(node, this.selectedId)
+      .map(
+        ([k, v]) =>
+          `<div class="insp-row"><span class="insp-key">${k}</span>` +
+          `<span class="insp-val">${escapeHtml(String(v))}</span></div>`
+      )
+      .join('');
+  }
+
+  private toggleGamePause(): void {
+    const result = togglePause();
+    if (!result.ok) {
+      this.setStatus(`暂停失败: ${result.error}`);
+      return;
+    }
+    this.syncPauseButton();
+    this.refreshAll(true);
+  }
+
+  private syncPauseButton(): void {
+    if (!this.pauseBtn) return;
+    const paused = getPauseState().paused;
+    this.pauseBtn.textContent = paused ? '继续' : '暂停';
+    this.pauseBtn.classList.toggle('pause-btn--active', paused);
+  }
+
+  private setStatus(text: string): void {
+    if (this.statusEl) this.statusEl.textContent = text;
+  }
+}
+
+function buildDetailRows(
+  node: EgretDisplayObject,
+  nodeId: string
+): Array<[string, string]> {
+  const exmlId = typeof node.id === 'string' ? node.id : '';
+  const t = getNodeTexture(node);
+  const tex = t
+    ? `${t.$bitmapWidth ?? t.textureWidth ?? 0}×${t.$bitmapHeight ?? t.textureHeight ?? 0}` +
+      (t.$bitmapX || t.$bitmapY ? ` @(${t.$bitmapX ?? 0},${t.$bitmapY ?? 0})` : '')
+    : '(none)';
+  const rows: Array<[string, string]> = [
+    ['id', nodeId],
+    ['ctor', node.constructor?.name || ''],
+  ];
+  if (exmlId) rows.push(['ExmlId', exmlId]);
+  rows.push(
+    ['visible', String(node.visible !== false)],
+    ['x/y', `${node.x ?? 0}, ${node.y ?? 0}`],
+    ['w/h', `${node.width ?? 0} × ${node.height ?? 0}`],
+    ['scale', `${node.scaleX ?? 1}, ${node.scaleY ?? 1}`],
+    ['rotation', String(node.rotation ?? 0)],
+    ['alpha', String(node.alpha ?? 1)],
+    ['texture', tex]
+  );
+  return rows;
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+export function startEgretInspector(): void {
+  new EgretInspector();
+}

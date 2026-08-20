@@ -1,19 +1,20 @@
 # Cocos Inspector 3
 
-面向 **Cocos Creator 3.x**、**2.x（含 2.4）** 与 **PixiJS（MVP）** 的 Chrome 扩展 + MCP：在浏览器试玩页查看场景、导出快照与纹理，并配合 **cocos-meta-mcp** 在 Creator 中复刻场景。
+面向 **Cocos Creator 3.x**、**2.x（含 2.4）**、**PixiJS（MVP）** 与 **Egret 5.x（MVP）** 的 Chrome 扩展 + MCP：在浏览器试玩页查看场景、导出快照与纹理，并配合 **cocos-meta-mcp** 在 Creator 中复刻场景。
 
 > 3.x：完整能力（树 / Inspector / 纹理 / MCP / 复刻）。  
 > 2.x：P0 节点树+暂停，P1 Sprite 贴图预览/下载，详见 [docs/features/cocos2-support.md](docs/features/cocos2-support.md)。  
-> Pixi：默认关闭；扩展图标打开「启用 PixiJS 探测」后可用于 stage 树 / sprite / 截图 / MCP，详见 [docs/features/pixi-support.md](docs/features/pixi-support.md)。
+> Pixi：默认关闭；扩展图标打开「启用 PixiJS 探测」后可用于 stage 树 / sprite / 截图 / MCP，详见 [docs/features/pixi-support.md](docs/features/pixi-support.md)。  
+> Egret：自动检测（无需开关），提供显示对象树、纹理提取、RES 资源清单与原始资源下载、**DragonBones/Spine 内存导出**（zip inline），详见 [docs/features/egret-support.md](docs/features/egret-support.md)。
 
 ## 功能
 
 ### 核心（main）
 
 - 场景节点树、Inspector 组件面板（含 **Node 位置**、扩展 **版本号**）
-- 工具栏 **暂停/继续**（`director.pause`），停住后看节点属性；MCP：`cocos_pause_game` 等
+- 工具栏 **暂停/继续**、**拾取**（3.x 含 3D Mesh AABB）、**下载**纹理/Spine/BMFont
 - MCP：`cocos_export_scene_snapshot`、`cocos_download_texture`、`scene-to-creator` 等
-- Spine / BMFont 内存导出、DC 扫描、资源浮窗
+- Spine / BMFont 内存导出（Cocos 3.x）、DragonBones / Spine 内存导出（Egret）
 - 与 Creator **cocos-meta-mcp** 配合复刻试玩场景（见下方 Skill）
 
 ### 分支（换皮）
@@ -51,15 +52,26 @@ npm run build
 2. 开启开发者模式
 3. 加载已解压的扩展 → 选择项目根目录
 
+### Chrome 网上应用店包
+
+```bash
+npm run package
+```
+
+仅打包扩展本体（`manifest.json` + `dist/` + `icons/`），**不含** MCP / tools。  
+说明与上架文案见 [docs/chrome-web-store.md](docs/chrome-web-store.md)，隐私政策见 [docs/privacy.md](docs/privacy.md)。
+
 ## 项目结构
 
 ```
 src/
   content.ts / injected.ts / background.ts
   cocos3/               # 场景树、快照、纹理、MCP 桥
+  egret/                # Egret 5.x MVP（树 / 贴图 / 资源 / DragonBones+Spine 导出 / MCP 桥）
 tools/
   mcp-cocos-inspector/  # Inspector MCP + scene-to-creator
   repack-web/           # 换皮 Web（分支能力）
+  verify-egret-cdp.mjs  # Egret 一次性验证（Edge + CDP）
 .cursor/skills/
   inspector-scene-recovery/  # 场景复刻 P+S Skill
 docs/                   # 见 docs/README.md

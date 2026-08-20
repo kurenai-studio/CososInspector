@@ -1,4 +1,19 @@
 import { logEngine } from '../engine/detect';
+import { appendBugFeedbackButton } from '../engine/bugFeedback';
+import {
+  bindMcpInstallGuide,
+  syncMcpGuideClickable,
+} from '../engine/mcpInstallGuide';
+import {
+  notePanelCollapsed,
+  startViewportWatch,
+} from '../engine/viewportWatch';
+import {
+  COCOS_DOWNLOAD_ITEMS,
+  createPickDownloadDom,
+  fillDownloadMenu,
+  placeDownloadMenu,
+} from '../engine/pickDownloadToolbar';
 import {
   countNodes,
   expandMatchingNodes,
@@ -12,14 +27,21 @@ import {
   renderNodeInspectorHtml,
 } from './nodeInspector';
 import {
+  isPickModeActive,
+  startPickMode,
+  stopPickMode,
+} from './nodePicker';
+import {
   buildTreeInfo,
   findNodeById,
   getNodeId,
   getNodeName,
+  getPathToNode,
   getSceneRoot,
   hashTree,
   setNodeActive,
 } from './sceneTree';
+import { runCocos2Download } from './toolbarDownload';
 import {
   downloadExtractPng,
   extractSpriteFrame,
@@ -43,12 +65,17 @@ export class CocosInspector2 {
   private searchInput: HTMLInputElement | null = null;
   private statusEl: HTMLElement | null = null;
   private pauseBtn: HTMLButtonElement | null = null;
+  private pickBtn: HTMLButtonElement | null = null;
+  private downloadBtn: HTMLButtonElement | null = null;
+  private downloadMenu: HTMLDivElement | null = null;
   private mcpStatusEl: HTMLElement | null = null;
 
   private expandedScene = new Set<string>();
   private selectedId: string | null = null;
   private searchQuery = '';
   private isCollapsed = false;
+  private isPickMode = false;
+  private isDownloading = false;
   private sceneTreeHash = '';
   private inspectorHash = '';
   private updateTimer: number | null = null;
@@ -66,6 +93,7 @@ export class CocosInspector2 {
     installMcpBridge();
     this.refreshAll(true);
     this.startAutoRefresh();
+    startViewportWatch('cocos2');
     window.postMessage({ type: 'cocos-inspector-ready', engineFamily: '2' }, '*');
     logEngine('已启动 2.x 面板（含 Spine/BMFont 导出）');
   }
@@ -119,6 +147,7 @@ export class CocosInspector2 {
       '<span class="mcp-status-dot" aria-hidden="true"></span><span class="mcp-status-label">MCP</span>';
     this.updateMcpStatus('disconnected', 17373);
     headerTop.appendChild(this.mcpStatusEl);
+    if (this.panel) bindMcpInstallGuide(this.mcpStatusEl, this.panel);
 
     header.appendChild(headerTop);
 
@@ -148,6 +177,29 @@ export class CocosInspector2 {
     this.pauseBtn.addEventListener('click', () => this.toggleGamePause());
     controls.appendChild(this.pauseBtn);
 
+    const pickDl = createPickDownloadDom();
+    this.pickBtn = pickDl.pickBtn;
+    this.downloadBtn = pickDl.downloadBtn;
+    this.downloadMenu = pickDl.downloadMenu;
+    this.pickBtn.addEventListener('click', () => this.togglePickMode());
+    this.downloadBtn.addEventListener('click', () => this.toggleDownloadMenu());
+    fillDownloadMenu(this.downloadMenu, COCOS_DOWNLOAD_ITEMS, (key) => {
+      this.onDownload(key).catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        this.setStatus(`下载失败: ${msg}`);
+      });
+    });
+    document.body.appendChild(this.downloadMenu);
+    document.addEventListener('click', (ev) => {
+      if (this.isCollapsed) return;
+      const target = ev.target as Node;
+      if (this.downloadMenu?.contains(target)) return;
+      if (this.downloadBtn === target) return;
+      this.hideDownloadMenu();
+    });
+    controls.appendChild(this.pickBtn);
+    controls.appendChild(this.downloadBtn);
+
     this.searchInput = document.createElement('input');
     this.searchInput.type = 'search';
     this.searchInput.className = 'search-input';
@@ -157,6 +209,8 @@ export class CocosInspector2 {
       this.refreshAll(true);
     });
     controls.appendChild(this.searchInput);
+
+    appendBugFeedbackButton(controls, this.panel);
 
     const toggleBtn = document.createElement('button');
     toggleBtn.type = 'button';
@@ -204,15 +258,22 @@ export class CocosInspector2 {
       disconnected:
         `未连接 MCP。请在 Cursor 启用 cocos-inspector MCP，并确认端口 ${port} 可用。`,
     };
-    this.mcpStatusEl.title = hints[status] ?? `MCP 状态: ${status}`;
+    this.mcpStatusEl.title =
+      status === 'disconnected'
+        ? '未连接 MCP。点击查看安装指引'
+        : hints[status] ?? `MCP 状态: ${status}`;
+    syncMcpGuideClickable(this.mcpStatusEl, status);
   }
 
   private setCollapsed(collapsed: boolean): void {
     if (!this.root || this.isCollapsed === collapsed) return;
     this.isCollapsed = collapsed;
     this.root.classList.toggle('is-collapsed', collapsed);
+    notePanelCollapsed(collapsed);
 
     if (collapsed) {
+      this.stopPickModeInternal();
+      this.hideDownloadMenu();
       this.stopAutoRefresh();
       this.sceneTreeContainer && (this.sceneTreeContainer.innerHTML = '');
       this.panel?.remove();
@@ -466,6 +527,83 @@ export class CocosInspector2 {
     const paused = getPauseState().paused;
     this.pauseBtn.textContent = paused ? '继续' : '暂停';
     this.pauseBtn.classList.toggle('pause-btn--active', paused);
+  }
+
+  private togglePickMode(): void {
+    if (this.isPickMode) this.stopPickModeInternal();
+    else this.startPickModeInternal();
+  }
+
+  private startPickModeInternal(): void {
+    if (this.isPickMode) return;
+    this.hideDownloadMenu();
+    this.isPickMode = true;
+    this.pickBtn?.classList.add('pick-btn--active');
+    if (this.pickBtn) this.pickBtn.textContent = '取消拾取';
+    this.setStatus('拾取中：点击画面节点，Esc 取消');
+    if (!isPickModeActive()) {
+      startPickMode((nodeId) => this.onNodePicked(nodeId));
+    }
+  }
+
+  private stopPickModeInternal(): void {
+    if (!this.isPickMode) return;
+    this.isPickMode = false;
+    this.pickBtn?.classList.remove('pick-btn--active');
+    if (this.pickBtn) this.pickBtn.textContent = '拾取';
+    stopPickMode();
+  }
+
+  private onNodePicked(nodeId: string): void {
+    this.selectedId = nodeId;
+    const scene = getSceneRoot();
+    if (scene) {
+      const path = getPathToNode(scene, nodeId);
+      if (path) {
+        for (const id of path) this.expandedScene.add(id);
+      }
+    }
+    this.stopPickModeInternal();
+    this.refreshAll(true);
+    requestAnimationFrame(() => this.scrollSelectedIntoView());
+  }
+
+  private scrollSelectedIntoView(): void {
+    const sel = this.sceneTreeContainer?.querySelector(
+      'li.selected'
+    ) as HTMLElement | null;
+    sel?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
+  private toggleDownloadMenu(): void {
+    if (!this.downloadMenu || !this.downloadBtn) return;
+    const open = this.downloadMenu.style.display !== 'none';
+    if (open) {
+      this.hideDownloadMenu();
+      return;
+    }
+    placeDownloadMenu(this.downloadMenu, this.downloadBtn);
+  }
+
+  private hideDownloadMenu(): void {
+    if (this.downloadMenu) this.downloadMenu.style.display = 'none';
+  }
+
+  private async onDownload(key: string): Promise<void> {
+    this.hideDownloadMenu();
+    if (this.isDownloading) return;
+    this.isDownloading = true;
+    if (this.downloadBtn) this.downloadBtn.disabled = true;
+    try {
+      await runCocos2Download(key, this.selectedId, (s) => this.setStatus(s));
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.setStatus(`下载失败: ${msg}`);
+      console.error('[下载:2.x]', error);
+    } finally {
+      this.isDownloading = false;
+      if (this.downloadBtn) this.downloadBtn.disabled = false;
+    }
   }
 
   private setStatus(text: string): void {

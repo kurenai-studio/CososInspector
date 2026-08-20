@@ -48,22 +48,26 @@
 - 页面仅保留右侧 **「节点树」** 边缘标签，不影响游戏性能
 - **点击标签**重新挂载面板并刷新场景树
 
-### 8. DC 扫描（子树 DrawCall 实测）
+### 8. 工具栏（v3.3.34）
 
-通过逐个关闭子树并测量 DrawCall 减少量，定位高 DC 贡献的节点路径。
+主干 2.x / 3.x 面板工具栏：
 
-- **一键扫描**: 工具栏「扫描 DC」+ 粒度下拉（快速 / 标准 / 精细）
-- **算法**: 逐子节点 `active=false` → 采样 DrawCall → 按减少量 Top-K 下钻
-- **降级**: 若运行时无法读取 DrawCall，则按子树渲染组件数量估算排名
-- **粒度控制**: `minDcDrop`、`maxDepth`、`maxTests` 等由模式预设
-- **结果展示**: 节点行旁注 `-XDC`（或估算模式下的渲染单元），自动展开嫌疑路径并选中 Top1
-- **清除**: 「清除」按钮移除旁注，恢复纯树视图
-
-| 模式 | minDcDrop | maxDepth | maxTests |
-|------|-----------|----------|----------|
-| 快速 | 3 | 4 | 20 |
-| 标准 | 1 | 8 | 40 |
-| 精细 | 1 | 12 | 80 |
+- **刷新** / **暂停** / **拾取** / **下载** / 节点搜索 / **收起**
+- 「收起」固定在工具栏右侧，`flex-shrink: 0`，不再被裁切
+- **拾取**：十字光标 + capture 拦截点击；悬停画包围盒；点击选中并展开祖先
+  （Esc 取消）
+  - 3.x **2D**：UI 相机 `screenToWorld` + `UITransform` 世界盒
+  - 3.x **3D**（v3.3.36）：场景透视相机射线 vs `MeshRenderer` AABB，
+    青色线框；小块 UI 优先，整屏 Canvas 不抢 3D 命中
+  - 2.x：`getBoundingBoxToWorld`
+- **下载**（Chrome 目录选择，复用已有导出，不含龙骨/图集裁剪）：
+  - 选中节点纹理 PNG
+  - 选中节点子树 Sprite PNG
+  - 选中节点 Spine zip / BMFont zip
+  - 整场景 Sprite PNG
+- **MCP 未连接**：点击右上角指示灯弹出安装指引（GitHub 仓库 + 本机桥步骤）
+- **已从面板移除**：「标准」粒度、「扫描 DC」、「清除」、「资源」
+  （试玩页兼容性差；源码仍留在 `perfScan.ts` / `assetPanel.ts`，面板不再暴露入口）
 
 ### 9. 节点 Inspector（全部组件）
 
@@ -86,17 +90,6 @@
 - MCP：`cocos_pause_game` / `cocos_resume_game` / `cocos_toggle_pause`（可选 `mode`: `director` | `game` | `both`）
 - `cocos_page_info` 返回 `paused` / `pause` 字段
 - **限制**：部分 Slots 自管 setTimeout/ticker，可能不完全跟随 director；可试 `mode: both`
-
-### 11. 资源加载状态浮窗
-
-独立浮窗展示 `cc.assetManager` 资源与 Bundle 状态（与主面板分离，可拖拽）。
-
-- **入口**: 工具栏「资源」按钮
-- **摘要**: 资源总数、Bundle 数、已加载 / 加载中、管线任务数
-- **资源表**: 名称、类型、状态、引用计数、所属 Bundle
-- **Bundle 表**: 名称、Base、资源数、依赖
-- **搜索**: 按名称 / UUID / Bundle 过滤
-- **自动刷新**: 打开后每 1.5s 刷新；收起主面板时自动关闭浮窗
 
 ## 技术实现
 

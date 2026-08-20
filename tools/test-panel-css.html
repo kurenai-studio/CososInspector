@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Panel CSS Test</title>
+<style>
+body { margin: 0; background: #1a1a1a; font-family: system-ui, sans-serif; }
+
+.cocos-inspector-panel {
+  position: fixed;
+  right: 0;
+  top: 0;
+  width: 380px;
+  height: 100vh;
+  background: rgba(36, 38, 42, 0.72);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 2147483646;
+}
+
+.cocos-inspector-header {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.inspector-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  position: relative;
+  margin-top: 8px;
+}
+
+.download-btn {
+  margin-left: auto;
+  padding: 4px 10px;
+  background: rgba(60, 140, 100, 0.85);
+  border: 1px solid rgba(80, 160, 120, 0.7);
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.download-menu {
+  position: fixed;
+  background: rgba(30, 30, 30, 0.97);
+  border: 1px solid rgba(102, 102, 102, 0.6);
+  border-radius: 4px;
+  padding: 4px;
+  z-index: 2147483647;
+  min-width: 280px;
+  max-height: 60vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  display: none;
+}
+
+.download-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  color: #ddd;
+  cursor: pointer;
+  font-size: 12px;
+  border-radius: 2px;
+}
+
+.download-menu-item:hover {
+  background: rgba(60, 140, 100, 0.6);
+  color: #fff;
+}
+
+.node-tree-panel {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 0;
+}
+
+.node-tree-item {
+  padding: 4px 12px;
+  color: #ddd;
+  font-size: 12px;
+}
+</style>
+</head>
+<body>
+
+<div class="cocos-inspector-panel">
+  <div class="cocos-inspector-header">
+    <div>Egret Inspector v3.3.0</div>
+    <div class="inspector-controls">
+      <button>刷新</button>
+      <button>暂停</button>
+      <input placeholder="搜索" style="flex:1" />
+      <button>收起</button>
+      <button>拾取</button>
+      <button class="download-btn" id="dlBtn">下载</button>
+      <div class="download-menu" id="dlMenu">
+        <button class="download-menu-item">整场景下载原图</button>
+        <button class="download-menu-item">整场景图集还原（按 sprite 裁剪）</button>
+        <button class="download-menu-item">选中节点子树资源（图集+龙骨）</button>
+        <button class="download-menu-item">选中节点纹理 PNG</button>
+        <button class="download-menu-item">选中节点龙骨 zip</button>
+        <button class="download-menu-item">选中节点龙骨完整（内存 ske+tex+png）</button>
+        <button class="download-menu-item">选中节点 Spine 完整（内存 json+skel+atlas+png）</button>
+        <button class="download-menu-item">资源 URL 清单 JSON</button>
+      </div>
+    </div>
+  </div>
+  <div class="node-tree-panel">
+    <div class="node-tree-item">▾ Stage</div>
+    <div class="node-tree-item">  ▾ imgBG</div>
+    <div class="node-tree-item">  ▾ imgLogo</div>
+    <div class="node-tree-item">  ▸ btn1</div>
+    <div class="node-tree-item">  ▸ btn2</div>
+    <div class="node-tree-item">  ▾ container</div>
+    <div class="node-tree-item">    ▸ child1</div>
+    <div class="node-tree-item">    ▸ child2</div>
+  </div>
+</div>
+
+<script>
+const btn = document.getElementById('dlBtn');
+const menu = document.getElementById('dlMenu');
+btn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const open = menu.style.display === 'block';
+  if (open) {
+    menu.style.display = 'none';
+    return;
+  }
+  const rect = btn.getBoundingClientRect();
+  menu.style.display = 'block';
+  menu.style.left = Math.max(8, rect.right - 280) + 'px';
+  menu.style.top = (rect.bottom + 4) + 'px';
+});
+document.addEventListener('click', () => {
+  menu.style.display = 'none';
+});
+</script>
+
+</body>
+</html>

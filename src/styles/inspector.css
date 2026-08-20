@@ -167,6 +167,79 @@
   background: #777;
 }
 
+.mcp-status--clickable {
+  cursor: pointer;
+}
+
+.mcp-status--clickable:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.mcp-install-guide {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 64px;
+  z-index: 30;
+  padding: 10px 12px;
+  background: rgba(22, 24, 28, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.mcp-install-guide-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.mcp-install-guide-lead {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.mcp-install-guide-link {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: #8ec8ff;
+  word-break: break-all;
+}
+
+.mcp-install-guide-steps {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.mcp-install-guide-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.mcp-install-guide-copy,
+.mcp-install-guide-close {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(68, 68, 68, 0.75);
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.mcp-install-guide-copy:hover,
+.mcp-install-guide-close:hover {
+  background: rgba(85, 85, 85, 0.9);
+}
+
 @keyframes mcp-pulse {
   0%,
   100% {
@@ -183,6 +256,8 @@
   display: flex;
   gap: 6px;
   align-items: center;
+  position: relative;
+  min-width: 0;
 }
 
 .refresh-btn {
@@ -224,21 +299,10 @@
   background: rgba(180, 70, 70, 0.95);
 }
 
-.perf-scan-mode {
-  padding: 3px 6px;
-  background: rgba(30, 30, 30, 0.9);
-  border: 1px solid rgba(102, 102, 102, 0.5);
-  color: #ddd;
-  border-radius: 4px;
-  font-size: 11px;
-  flex-shrink: 0;
-  max-width: 56px;
-}
-
-.perf-scan-btn {
-  padding: 4px 8px;
-  background: rgba(76, 120, 68, 0.9);
-  border: 1px solid rgba(102, 160, 90, 0.7);
+.pick-btn {
+  padding: 4px 10px;
+  background: rgba(50, 80, 130, 0.9);
+  border: 1px solid rgba(80, 120, 180, 0.7);
   color: #fff;
   border-radius: 4px;
   cursor: pointer;
@@ -246,27 +310,67 @@
   flex-shrink: 0;
 }
 
-.perf-scan-btn:hover:not(:disabled) {
-  background: rgba(92, 145, 82, 0.95);
+.pick-btn:hover {
+  background: rgba(60, 95, 150, 0.95);
 }
 
-.perf-scan-btn:disabled {
-  opacity: 0.65;
-  cursor: wait;
+.pick-btn--active {
+  background: rgba(180, 90, 40, 0.95);
+  border-color: rgba(210, 120, 60, 0.85);
 }
 
-.perf-clear-btn {
-  padding: 4px 6px;
-  background: rgba(68, 68, 68, 0.75);
-  border: 1px solid rgba(102, 102, 102, 0.6);
-  color: #ccc;
+.pick-btn--active:hover {
+  background: rgba(200, 100, 45, 0.98);
+}
+
+.download-btn {
+  padding: 4px 10px;
+  background: rgba(40, 100, 70, 0.9);
+  border: 1px solid rgba(60, 140, 100, 0.7);
+  color: #fff;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   flex-shrink: 0;
 }
 
-.perf-clear-btn:hover:not(:disabled) {
+.download-btn:hover {
+  background: rgba(48, 115, 80, 0.95);
+}
+
+.download-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.download-menu {
+  position: fixed;
+  background: rgba(30, 30, 30, 0.97);
+  border: 1px solid rgba(102, 102, 102, 0.6);
+  border-radius: 4px;
+  padding: 4px;
+  z-index: 2147483647;
+  min-width: 280px;
+  max-height: 60vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.download-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  color: #ddd;
+  cursor: pointer;
+  font-size: 12px;
+  border-radius: 2px;
+}
+
+.download-menu-item:hover {
+  background: rgba(60, 140, 100, 0.6);
   color: #fff;
 }
 
@@ -279,6 +383,8 @@
   cursor: pointer;
   font-size: 12px;
   flex-shrink: 0;
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .header-toggle-btn:hover {
@@ -287,7 +393,7 @@
 
 .search-input {
   flex: 1;
-  min-width: 0;
+  min-width: 72px;
   padding: 4px 8px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 4px;
@@ -1178,21 +1284,6 @@ li.selected > .node-tree-item {
   margin-top: 2px;
 }
 
-.asset-panel-btn {
-  padding: 4px 8px;
-  background: rgba(53, 90, 140, 0.9);
-  border: 1px solid rgba(90, 130, 190, 0.7);
-  color: #fff;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
-.asset-panel-btn:hover {
-  background: rgba(68, 110, 165, 0.95);
-}
-
 .asset-float-panel {
   position: fixed;
   right: 24px;
@@ -1429,4 +1520,103 @@ li.selected > .node-tree-item {
 }
 .sprite-download-btn-2x:hover {
   border-color: rgba(120, 200, 160, 0.5);
+}
+
+/* 反馈 BUG（仅诊断日志） */
+.insp-bug-feedback-btn {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 180, 80, 0.35);
+  background: rgba(90, 60, 20, 0.75);
+  color: #ffe0b2;
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.insp-bug-feedback-btn:hover {
+  border-color: rgba(255, 200, 120, 0.55);
+  color: #fff;
+}
+
+.insp-bug-feedback {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 64px;
+  z-index: 40;
+  padding: 10px 12px;
+  background: rgba(22, 24, 28, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  max-height: calc(100vh - 96px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.insp-bug-feedback-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.insp-bug-feedback-lead {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.insp-bug-feedback-note {
+  width: 100%;
+  resize: vertical;
+  min-height: 64px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 12px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.insp-bug-feedback-preview {
+  margin: 0;
+  padding: 8px;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 10px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(200, 220, 200, 0.9);
+}
+
+.insp-bug-feedback-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.insp-bug-feedback-download,
+.insp-bug-feedback-copy,
+.insp-bug-feedback-close {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(68, 68, 68, 0.75);
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.insp-bug-feedback-download {
+  background: rgba(46, 90, 60, 0.85);
+  border-color: rgba(120, 200, 160, 0.35);
 }

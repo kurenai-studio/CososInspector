@@ -10,10 +10,12 @@ const pkgVersion = JSON.parse(
 const dist = join(root, 'dist');
 const minify = process.argv.includes('--minify');
 const watch = process.argv.includes('--watch');
+const noSourcemap = process.argv.includes('--no-sourcemap');
 
 mkdirSync(dist, { recursive: true });
 
 const minifyFlag = minify ? ['--minify'] : [];
+const sourcemap = !noSourcemap;
 
 async function build() {
   let esbuildMod = null;
@@ -27,7 +29,7 @@ async function build() {
     bundle: true,
     format: 'iife',
     target: ['chrome90'],
-    sourcemap: true,
+    sourcemap,
     minify,
     logLevel: 'info',
     define: {

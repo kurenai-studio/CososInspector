@@ -61,6 +61,30 @@ export function findNodeById(root: Cc2Node, id: string): Cc2Node | null {
   return null;
 }
 
+/** 从 root 到 targetId 的节点 id 路径（含目标，不含 root），用于自动展开 */
+export function getPathToNode(
+  root: Cc2Node,
+  targetId: string
+): string[] | null {
+  if (getNodeId(root) === targetId) return [];
+  const path: string[] = [];
+  const walk = (node: Cc2Node): boolean => {
+    if (getNodeId(node) === targetId) return true;
+    for (const child of getNodeChildren(node)) {
+      path.push(getNodeId(child));
+      if (walk(child)) return true;
+      path.pop();
+    }
+    return false;
+  };
+  for (const child of getNodeChildren(root)) {
+    path.push(getNodeId(child));
+    if (walk(child)) return path;
+    path.pop();
+  }
+  return null;
+}
+
 export function buildTreeInfo(root: Cc2Node): TreeNodeInfo {
   const children = [...getNodeChildren(root)]
     .sort((a, b) => getNodeName(a).localeCompare(getNodeName(b)))

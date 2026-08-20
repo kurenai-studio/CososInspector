@@ -1,36 +1,33 @@
 {
   "manifest_version": 3,
   "name": "Cocos Inspector 3",
-  "version": "4.0.0",
-  "description": "Cocos Creator 3.x / 2.x / PixiJS 场景节点树查看器",
-  "permissions": [
-    "activeTab",
-    "scripting",
-    "tabs",
-    "storage"
-  ],
-  "host_permissions": [
-    "http://*/*",
-    "https://*/*"
-  ],
+  "version": "3.3.37",
+  "description": "在试玩页查看 Cocos Creator / Egret / PixiJS 场景节点树、组件与资源，辅助调试与导出。",
+  "permissions": ["activeTab", "tabs", "storage"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "action": {
     "default_title": "Cocos Inspector",
-    "default_popup": "dist/popup/popup.html"
+    "default_popup": "dist/popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
   },
   "background": {
     "service_worker": "dist/background.js"
   },
   "content_scripts": [
     {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
-        "dist/content.js"
-      ],
-      "css": [
-        "dist/inspector.css"
-      ],
+      "matches": ["<all_urls>"],
+      "js": ["dist/content.js"],
+      "css": ["dist/inspector.css"],
       "run_at": "document_start",
       "all_frames": true
     }
@@ -42,9 +39,7 @@
         "dist/inspector.css",
         "dist/pixi-probe.js"
       ],
-      "matches": [
-        "<all_urls>"
-      ]
+      "matches": ["<all_urls>"]
     }
   ]
 }

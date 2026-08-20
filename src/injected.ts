@@ -2,7 +2,6 @@
 
 declare const __INSPECTOR_VERSION__: string;
 
-import { AssetFloatingPanel } from './cocos3/assetPanel';
 import { log } from './cocos3/detect';
 import { installMcpBridge } from './cocos3/mcpBridge';
 import { startCocosInspector2 } from './cocos2/panel';
@@ -12,7 +11,23 @@ import {
   waitForEngine,
 } from './engine/detect';
 import { whenDomReady } from './engine/mount';
+import { appendBugFeedbackButton } from './engine/bugFeedback';
+import {
+  bindMcpInstallGuide,
+  syncMcpGuideClickable,
+} from './engine/mcpInstallGuide';
+import {
+  notePanelCollapsed,
+  startViewportWatch,
+} from './engine/viewportWatch';
+import {
+  COCOS_DOWNLOAD_ITEMS,
+  createPickDownloadDom,
+  fillDownloadMenu,
+  placeDownloadMenu,
+} from './engine/pickDownloadToolbar';
 import { startPixiInspector } from './pixi/panel';
+import { startEgretInspector } from './egret/panel';
 import { installPixiConsoleHint } from './pixi/runtime';
 import {
   collectNodeInspectorData,
@@ -20,12 +35,6 @@ import {
   hashNodeInspectorData,
   renderNodeInspectorHtml,
 } from './cocos3/renderableInspector';
-import {
-  expandSuspectPaths,
-  type PerfScanMode,
-  type PerfScanReport,
-  runPerfScan,
-} from './cocos3/perfScan';
 import {
   copyRecoveredScript,
   downloadRecoveredScript,
@@ -43,17 +52,23 @@ import {
   togglePause,
 } from './cocos3/gamePause';
 import {
+  isPickModeActive,
+  startPickMode,
+  stopPickMode,
+} from './cocos3/nodePicker';
+import {
   buildTreeInfo,
   findNodeById,
   getNodeId,
+  getPathToNode,
   getSceneRoot,
   hashTree,
   setNodeActive,
 } from './cocos3/sceneTree';
+import { runCocos3Download } from './cocos3/toolbarDownload';
 import {
   countNodes,
   expandMatchingNodes,
-  maxPerfDc,
   renderTreeHtml,
 } from './cocos3/treeRender';
 
@@ -69,25 +84,21 @@ class CocosInspector3 {
   private statusEl: HTMLElement | null = null;
   private mainBody: HTMLElement | null = null;
   private mcpStatusEl: HTMLElement | null = null;
-  private scanBtn: HTMLButtonElement | null = null;
-  private scanModeSelect: HTMLSelectElement | null = null;
-  private clearScanBtn: HTMLButtonElement | null = null;
-  private assetBtn: HTMLButtonElement | null = null;
   private pauseBtn: HTMLButtonElement | null = null;
+  private pickBtn: HTMLButtonElement | null = null;
+  private downloadBtn: HTMLButtonElement | null = null;
+  private downloadMenu: HTMLDivElement | null = null;
 
   private expandedScene = new Set<string>();
   private selectedId: string | null = null;
   private searchQuery = '';
   private isCollapsed = false;
+  private isPickMode = false;
+  private isDownloading = false;
   private sceneTreeHash = '';
   private inspectorHash = '';
   private spritePreviewToken = 0;
   private updateTimer: number | null = null;
-
-  private scanRunning = false;
-  private scanCancel = false;
-  private perfReport: PerfScanReport | null = null;
-  private assetPanel = new AssetFloatingPanel();
 
   constructor() {
     this.init();
@@ -100,8 +111,9 @@ class CocosInspector3 {
     this.refreshAll(true);
     this.startAutoRefresh();
     installMcpBridge();
+    startViewportWatch('cocos3');
     window.postMessage({ type: 'cocos-inspector-ready' }, '*');
-    log('已启动（全量场景树 + Inspector + DC 扫描 + 资源面板）');
+    log('已启动（全量场景树 + Inspector）');
   }
 
   private createUI(): void {
@@ -156,6 +168,7 @@ class CocosInspector3 {
       '<span class="mcp-status-dot" aria-hidden="true"></span><span class="mcp-status-label">MCP</span>';
     this.updateMcpStatus('disconnected', 17373);
     headerTop.appendChild(this.mcpStatusEl);
+    if (this.panel) bindMcpInstallGuide(this.mcpStatusEl, this.panel);
 
     header.appendChild(headerTop);
 
@@ -183,45 +196,28 @@ class CocosInspector3 {
     this.pauseBtn.addEventListener('click', () => this.toggleGamePause());
     controls.appendChild(this.pauseBtn);
 
-    this.scanModeSelect = document.createElement('select');
-    this.scanModeSelect.className = 'perf-scan-mode';
-    this.scanModeSelect.title = 'DC 扫描粒度';
-    [
-      ['quick', '快速'],
-      ['standard', '标准'],
-      ['fine', '精细'],
-    ].forEach(([value, label]) => {
-      const opt = document.createElement('option');
-      opt.value = value;
-      opt.textContent = label;
-      if (value === 'standard') opt.selected = true;
-      this.scanModeSelect!.appendChild(opt);
+    const pickDl = createPickDownloadDom();
+    this.pickBtn = pickDl.pickBtn;
+    this.downloadBtn = pickDl.downloadBtn;
+    this.downloadMenu = pickDl.downloadMenu;
+    this.pickBtn.addEventListener('click', () => this.togglePickMode());
+    this.downloadBtn.addEventListener('click', () => this.toggleDownloadMenu());
+    fillDownloadMenu(this.downloadMenu, COCOS_DOWNLOAD_ITEMS, (key) => {
+      this.onDownload(key).catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        this.setStatus(`下载失败: ${msg}`);
+      });
     });
-    controls.appendChild(this.scanModeSelect);
-
-    this.scanBtn = document.createElement('button');
-    this.scanBtn.type = 'button';
-    this.scanBtn.className = 'perf-scan-btn';
-    this.scanBtn.textContent = '扫描 DC';
-    this.scanBtn.title = '逐个关闭子树测量 DrawCall 减少量，定位高 DC 节点';
-    this.scanBtn.addEventListener('click', () => void this.startPerfScan());
-    controls.appendChild(this.scanBtn);
-
-    this.clearScanBtn = document.createElement('button');
-    this.clearScanBtn.type = 'button';
-    this.clearScanBtn.className = 'perf-clear-btn';
-    this.clearScanBtn.textContent = '清除';
-    this.clearScanBtn.title = '清除 DC 扫描结果';
-    this.clearScanBtn.addEventListener('click', () => this.clearPerfScan());
-    controls.appendChild(this.clearScanBtn);
-
-    this.assetBtn = document.createElement('button');
-    this.assetBtn.type = 'button';
-    this.assetBtn.className = 'asset-panel-btn';
-    this.assetBtn.textContent = '资源';
-    this.assetBtn.title = '打开资源加载状态浮窗';
-    this.assetBtn.addEventListener('click', () => this.assetPanel.toggle());
-    controls.appendChild(this.assetBtn);
+    document.body.appendChild(this.downloadMenu);
+    document.addEventListener('click', (ev) => {
+      if (this.isCollapsed) return;
+      const target = ev.target as Node;
+      if (this.downloadMenu?.contains(target)) return;
+      if (this.downloadBtn === target) return;
+      this.hideDownloadMenu();
+    });
+    controls.appendChild(this.pickBtn);
+    controls.appendChild(this.downloadBtn);
 
     this.searchInput = document.createElement('input');
     this.searchInput.type = 'search';
@@ -232,6 +228,8 @@ class CocosInspector3 {
       this.refreshAll(true);
     });
     controls.appendChild(this.searchInput);
+
+    appendBugFeedbackButton(controls, this.panel);
 
     const toggleBtn = document.createElement('button');
     toggleBtn.type = 'button';
@@ -263,75 +261,6 @@ class CocosInspector3 {
     document.body.appendChild(this.root);
   }
 
-  private setScanUiRunning(running: boolean): void {
-    if (this.scanBtn) {
-      this.scanBtn.disabled = running;
-      this.scanBtn.textContent = running ? '扫描中…' : '扫描 DC';
-    }
-    if (this.scanModeSelect) this.scanModeSelect.disabled = running;
-    if (this.clearScanBtn) this.clearScanBtn.disabled = running;
-  }
-
-  private clearPerfScan(): void {
-    if (this.scanRunning) return;
-    this.perfReport = null;
-    this.refreshAll(true);
-    this.setStatus('已清除 DC 扫描结果');
-  }
-
-  private async startPerfScan(): Promise<void> {
-    if (this.scanRunning) {
-      this.scanCancel = true;
-      return;
-    }
-
-    const scene = getSceneRoot();
-    if (!scene) {
-      this.setStatus('无法扫描：场景未就绪');
-      return;
-    }
-
-    const mode = (this.scanModeSelect?.value ?? 'standard') as PerfScanMode;
-    this.scanRunning = true;
-    this.scanCancel = false;
-    this.setScanUiRunning(true);
-    this.stopAutoRefresh();
-
-    const report = await runPerfScan(
-      mode,
-      (p) => {
-        if (p.phase === 'scanning' || p.phase === 'baseline') {
-          this.setStatus(
-            `${p.message} · ${p.testsDone}/${p.testsBudget}`
-          );
-        } else {
-          this.setStatus(p.message);
-        }
-      },
-      () => this.scanCancel
-    );
-
-    this.scanRunning = false;
-    this.scanCancel = false;
-    this.setScanUiRunning(false);
-    this.startAutoRefresh();
-
-    if (report) {
-      this.perfReport = report;
-      expandSuspectPaths(scene, report.dcByNodeId, this.expandedScene, 1);
-      const top = report.suspects[0];
-      if (top) {
-        this.selectedId = top.nodeId;
-        const unit = report.method === 'estimated' ? '渲染单元' : 'DC';
-        console.log(
-          `[DC扫描] Top ${top.nodeName}(${top.nodeId}) -${top.dcDrop} ${unit} · ${top.path}`
-        );
-      }
-    }
-
-    this.refreshAll(true);
-  }
-
   private stopAutoRefresh(): void {
     if (this.updateTimer !== null) {
       window.clearInterval(this.updateTimer);
@@ -360,7 +289,11 @@ class CocosInspector3 {
       connected: `已连接 Cursor MCP 桥接（端口 ${port}）`,
       disconnected: `未连接 MCP。请在 Cursor 启用 cocos-inspector MCP，并确认端口 ${port} 可用。`,
     };
-    this.mcpStatusEl.title = hints[status];
+    this.mcpStatusEl.title =
+      status === 'disconnected'
+        ? '未连接 MCP。点击查看安装指引'
+        : hints[status];
+    syncMcpGuideClickable(this.mcpStatusEl, status);
   }
 
   private toggleCollapse(): void {
@@ -387,7 +320,6 @@ class CocosInspector3 {
       this.statusEl.textContent = '';
     }
     this.sceneTreeHash = '';
-    this.assetPanel.close();
     this.panel?.remove();
   }
 
@@ -396,11 +328,11 @@ class CocosInspector3 {
 
     this.isCollapsed = collapsed;
     this.root.classList.toggle('is-collapsed', collapsed);
+    notePanelCollapsed(collapsed);
 
     if (collapsed) {
-      if (this.scanRunning) {
-        this.scanCancel = true;
-      }
+      this.stopPickModeInternal();
+      this.hideDownloadMenu();
       this.stopAutoRefresh();
       this.detachPanel();
       log('面板已收起，停止渲染');
@@ -425,7 +357,7 @@ class CocosInspector3 {
   }
 
   private startAutoRefresh(): void {
-    if (this.isCollapsed || this.scanRunning) return;
+    if (this.isCollapsed) return;
     this.stopAutoRefresh();
     this.updateTimer = window.setInterval(
       () => this.refreshAll(false),
@@ -594,13 +526,7 @@ class CocosInspector3 {
     }
 
     const treeInfo = buildTreeInfo(scene);
-    const perfDc = this.perfReport?.dcByNodeId;
-    const perfHash = perfDc
-      ? [...perfDc.entries()].map(([k, v]) => `${k}:${Math.round(v)}`).join(',')
-      : '';
-    const nextSceneHash = `${hashTree(treeInfo)}|perf:${perfHash}|sel:${this.selectedId ?? ''}`;
-
-    const treeOnlyHash = `${hashTree(treeInfo)}|perf:${perfHash}`;
+    const treeOnlyHash = hashTree(treeInfo);
     const treeChanged = force || treeOnlyHash !== this.sceneTreeHash;
 
     if (treeChanged) {
@@ -611,7 +537,6 @@ class CocosInspector3 {
       }
 
       const sceneRootId = getNodeId(scene);
-      const perfDcMax = maxPerfDc(perfDc);
 
       if (this.sceneTreeContainer) {
         this.sceneTreeContainer.innerHTML = `<ul class="node-tree">${renderTreeHtml(
@@ -622,8 +547,6 @@ class CocosInspector3 {
             searchQuery: this.searchQuery,
             isRoot: true,
             sceneRootId,
-            perfDcByNodeId: perfDc,
-            perfDcMax,
           }
         )}</ul>`;
       }
@@ -633,26 +556,7 @@ class CocosInspector3 {
     this.syncPauseButton();
 
     const nodeCount = countNodes(treeInfo);
-    if (this.scanRunning) return;
-
     const pauseTag = getPauseState().paused ? ' · 已暂停' : '';
-
-    if (this.perfReport) {
-      const top = this.perfReport.suspects[0];
-      const unit = this.perfReport.method === 'estimated' ? '渲染单元' : 'DC';
-      const topText = top
-        ? ` · Top ${top.nodeName} -${Math.round(top.dcDrop)} ${unit}`
-        : '';
-      const baseline =
-        this.perfReport.method === 'measured'
-          ? `基准 ${Math.round(this.perfReport.baselineDc)} DC`
-          : '估算模式';
-      this.setStatus(
-        `场景树 · ${nodeCount} 节点 · ${baseline}${topText}${pauseTag}`
-      );
-      return;
-    }
-
     this.setStatus(
       `场景树 · ${nodeCount} 个节点 · ${scene.name || 'Scene'}${pauseTag}`
     );
@@ -677,6 +581,83 @@ class CocosInspector3 {
     this.pauseBtn.title = paused
       ? '恢复游戏（director.resume）'
       : '暂停游戏（director.pause），便于停住后查看节点属性';
+  }
+
+  private togglePickMode(): void {
+    if (this.isPickMode) this.stopPickModeInternal();
+    else this.startPickModeInternal();
+  }
+
+  private startPickModeInternal(): void {
+    if (this.isPickMode) return;
+    this.hideDownloadMenu();
+    this.isPickMode = true;
+    this.pickBtn?.classList.add('pick-btn--active');
+    if (this.pickBtn) this.pickBtn.textContent = '取消拾取';
+    this.setStatus('拾取中：点击画面节点，Esc 取消');
+    if (!isPickModeActive()) {
+      startPickMode((nodeId) => this.onNodePicked(nodeId));
+    }
+  }
+
+  private stopPickModeInternal(): void {
+    if (!this.isPickMode) return;
+    this.isPickMode = false;
+    this.pickBtn?.classList.remove('pick-btn--active');
+    if (this.pickBtn) this.pickBtn.textContent = '拾取';
+    stopPickMode();
+  }
+
+  private onNodePicked(nodeId: string): void {
+    this.selectedId = nodeId;
+    const scene = getSceneRoot();
+    if (scene) {
+      const path = getPathToNode(scene, nodeId);
+      if (path) {
+        for (const id of path) this.expandedScene.add(id);
+      }
+    }
+    this.stopPickModeInternal();
+    this.refreshAll(true);
+    requestAnimationFrame(() => this.scrollSelectedIntoView());
+  }
+
+  private scrollSelectedIntoView(): void {
+    const sel = this.sceneTreeContainer?.querySelector(
+      'li.selected'
+    ) as HTMLElement | null;
+    sel?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
+  private toggleDownloadMenu(): void {
+    if (!this.downloadMenu || !this.downloadBtn) return;
+    const open = this.downloadMenu.style.display !== 'none';
+    if (open) {
+      this.hideDownloadMenu();
+      return;
+    }
+    placeDownloadMenu(this.downloadMenu, this.downloadBtn);
+  }
+
+  private hideDownloadMenu(): void {
+    if (this.downloadMenu) this.downloadMenu.style.display = 'none';
+  }
+
+  private async onDownload(key: string): Promise<void> {
+    this.hideDownloadMenu();
+    if (this.isDownloading) return;
+    this.isDownloading = true;
+    if (this.downloadBtn) this.downloadBtn.disabled = true;
+    try {
+      await runCocos3Download(key, this.selectedId, (s) => this.setStatus(s));
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.setStatus(`下载失败: ${msg}`);
+      console.error('[下载:3.x]', error);
+    } finally {
+      this.isDownloading = false;
+      if (this.downloadBtn) this.downloadBtn.disabled = false;
+    }
   }
 
   private refreshInspector(force: boolean): void {
@@ -797,11 +778,12 @@ function bootInspector(): void {
     installPixiConsoleHint();
   }
 
-  const start = (family: '2' | '3' | 'pixi'): void => {
+  const start = (family: '2' | '3' | 'egret' | 'pixi'): void => {
     try {
       logEngine(`准备启动面板 engineFamily=${family}`);
       if (family === '3') new CocosInspector3();
       else if (family === '2') startCocosInspector2();
+      else if (family === 'egret') startEgretInspector();
       else startPixiInspector();
     } catch (e) {
       console.error(`[Cocos Inspector] 启动 ${family} 面板失败`, e);

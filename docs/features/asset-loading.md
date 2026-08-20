@@ -1,12 +1,15 @@
 # 资源加载状态浮窗
 
+> **v3.3.32**：主干工具栏已去掉「资源」入口。源码仍保留，面板不再暴露。
+> 多数试玩包 `cc.assetManager` 不完整，浮窗兼容性差。
+
 ## 功能概述
 
 在 Cocos 游戏页面内提供独立浮窗，实时查看 `cc.assetManager` 下的资源缓存与 Bundle 信息，便于排查加载中资源、引用泄漏与 Bundle 依赖。
 
 ## 入口与交互
 
-- 主面板工具栏 **「资源」** 按钮打开/关闭浮窗
+- **v3.3.32 起无面板入口**（原工具栏「资源」按钮已移除）
 - 浮窗可 **拖拽标题栏** 移动位置
 - **↻** 手动刷新；打开后 **每 1.5s** 自动刷新
 - 收起主 Inspector 面板时浮窗自动关闭
@@ -44,7 +47,7 @@
 
 - `src/cocos3/assetInventory.ts` — 遍历 `assetManager.assets` / `bundles`
 - `src/cocos3/assetPanel.ts` — 浮窗 UI、拖拽、刷新
-- `src/injected.ts` — 工具栏按钮与生命周期
+- `src/injected.ts` — v3.3.32 起不再挂工具栏按钮
 
 ```typescript
 const inv = collectAssetInventory();

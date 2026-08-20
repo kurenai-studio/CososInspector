@@ -1,8 +1,9 @@
 # Cocos Inspector 3 文档索引
 
 当前主能力：**试玩页场景读取（S）+ Creator 场景复刻（P）+ MCP 自动化**。  
-**v4.0.0**：Dump → Creator 工程后处理闭环（SpriteAtlas / Spine / 脚本 CID /
-场景节点 UUID / 压缩 UUID 展开等）；另见 **Bundle 逻辑还原**——
+**扩展现行版本 v3.3.37**（含 Egret / 反馈诊断日志）。  
+另有 Dump → Creator 工程后处理能力（SpriteAtlas / Spine / 脚本 CID /
+场景节点 UUID / 压缩 UUID 展开等）；Bundle 逻辑还原见
 [bundle-logic-recovery.md](features/bundle-logic-recovery.md)。
 
 **怎么用（简要）** → [features/usage.md](features/usage.md)（面板 UI vs MCP/CLI）
@@ -23,8 +24,13 @@
 | 文档 | 说明 |
 |------|------|
 | [usage.md](features/usage.md) | **怎么用（简要）**：装扩展、面板、MCP、Dump |
+| [../CHANGELOG.md](../CHANGELOG.md) | 商店发布后的版本变更（后续优化必记） |
+| [chrome-web-store.md](chrome-web-store.md) | Chrome 网上应用店上架清单与文案 |
+| [privacy.md](privacy.md) | 扩展隐私政策（商店提交用） |
+| [bug-feedback.md](features/bug-feedback.md) | 面板「反馈」诊断日志导出 |
 | [cocos2-support.md](features/cocos2-support.md) | Creator 2.x（含 2.4）P0–P8a 支持 |
 | [pixi-support.md](features/pixi-support.md) | PixiJS MVP（stage / MCP / 截图） |
+| [egret-support.md](features/egret-support.md) | Egret 5.x MVP（树 / 贴图 / 资源清单 / 原始资源下载） |
 | [scene-recovery.md](features/scene-recovery.md) | Inspector → Creator 场景恢复（详细） |
 | [inspector-mcp-multi-instance.md](features/inspector-mcp-multi-instance.md) | 多试玩域 MCP 桥接 |
 | [mcp-local-bridge-cors.md](features/mcp-local-bridge-cors.md) | 自研 MCP 本地桥 CORS / Origin 安全 |
@@ -50,4 +56,4 @@
 - `features/hooks.md`、`inspector.md`、`performance.md`、`ui-controls.md` — 2.x 已移除能力，仅作参考
 - `fastspin-analysis/` — FastSpin 逆向（`archive/legacy-main` 时代产物）
 
-实现代码：`src/cocos3/`、`src/cocos2/`、`src/pixi/`、`tools/mcp-cocos-inspector/`。根目录 [README.md](../README.md) 含构建安装说明。
+实现代码：`src/cocos3/`、`src/cocos2/`、`src/pixi/`、`src/egret/`、`tools/mcp-cocos-inspector/`。根目录 [README.md](../README.md) 含构建安装说明。
